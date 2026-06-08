@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/bastion-framework/bast/router"
 )
 
 const defaultMaxBodySize = 4 * 1024 * 1024 // 4MB
@@ -32,8 +34,10 @@ type Ctx struct {
 	// writer is unexported — handlers never write directly.
 	writer http.ResponseWriter
 
-	// Route params parsed by the router.
-	params map[string]string
+	// paramStorage is pre-allocated inside the struct — no heap allocation for params.
+	// params slices into paramStorage so router appends never escape to the heap.
+	paramStorage [8]router.Param
+	params       []router.Param
 
 	// Internal store for middleware-injected typed values.
 	store map[string]any
@@ -52,10 +56,9 @@ type Ctx struct {
 // ctxPool manages *Ctx recycling.
 var ctxPool = sync.Pool{
 	New: func() any {
-		return &Ctx{
-			params: make(map[string]string, 8),
-			store:  make(map[string]any, 8),
-		}
+		c := &Ctx{store: make(map[string]any, 8)}
+		c.params = c.paramStorage[:0]
+		return c
 	},
 }
 
@@ -76,7 +79,7 @@ func releaseCtx(c *Ctx) {
 	ctxPool.Put(c)
 }
 
-// wipe zeros every field. No partial resets.
+// wipe zeros every field. No partial resets, no map allocation.
 func (c *Ctx) wipe() {
 	c.Request = nil
 	c.writer = nil
@@ -85,9 +88,7 @@ func (c *Ctx) wipe() {
 	c.maxBodySize = 0
 	c.trustedProxies = nil
 	c.validator = nil
-	for k := range c.params {
-		delete(c.params, k)
-	}
+	c.params = c.paramStorage[:0] // reset length, keep backing array
 	for k := range c.store {
 		delete(c.store, k)
 	}
@@ -96,11 +97,12 @@ func (c *Ctx) wipe() {
 // newTestCtx builds a *Ctx outside the pool for use in basttest.
 // Never call releaseCtx on a test ctx — it is not pooled.
 func newTestCtx() *Ctx {
-	return &Ctx{
-		params:      make(map[string]string, 8),
+	c := &Ctx{
 		store:       make(map[string]any, 8),
 		maxBodySize: defaultMaxBodySize,
 	}
+	c.params = c.paramStorage[:0]
+	return c
 }
 
 // NewTestCtx is the exported form for basttest only.
@@ -131,7 +133,11 @@ func InitTestCtx(c *Ctx, w http.ResponseWriter, r *http.Request) {
 
 // SetTestParam sets a route param on a test Ctx. For basttest only.
 func SetTestParam(c *Ctx, key, value string) {
-	c.params[key] = value
+	n := len(c.params)
+	if n < len(c.paramStorage) {
+		c.paramStorage[n] = router.Param{Key: key, Value: value}
+		c.params = c.paramStorage[:n+1]
+	}
 }
 
 // SetTestBody pre-loads the body buffer on a test Ctx so readBody() is skipped.
@@ -165,7 +171,12 @@ func (c *Ctx) WithValue(key, val any) *Ctx {
 
 // Param returns a URL path parameter by name.
 func (c *Ctx) Param(key string) string {
-	return c.params[key]
+	for i := range c.params {
+		if c.params[i].Key == key {
+			return c.params[i].Value
+		}
+	}
+	return ""
 }
 
 // Query returns a URL query parameter by name.

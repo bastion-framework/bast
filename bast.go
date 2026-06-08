@@ -163,7 +163,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := acquireCtx(w, r, a.cfg.MaxBodySize, a.proxies, a.cfg.Validator)
 	defer releaseCtx(ctx)
 
-	match, err := a.router.Find(r.Method, r.URL.Path)
+	// Pass ctx.params (backed by ctx.paramStorage) — router writes params in-place, 0 allocs.
+	match, err := a.router.Find(r.Method, r.URL.Path, ctx.params)
 	if err != nil {
 		var mna *router.MethodNotAllowedError
 		if errors.As(err, &mna) {
@@ -181,11 +182,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "404 not found", http.StatusNotFound)
 		return
 	}
-
-	// Set route params on Ctx.
-	for k, v := range match.Params {
-		ctx.params[k] = v
-	}
+	ctx.params = match.Params // already points into ctx.paramStorage
 
 	switch h := match.Handler.(type) {
 	case StreamHandlerFunc:

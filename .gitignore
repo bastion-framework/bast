@@ -1,2 +1,30 @@
 AGENT.md
 SPEC.md
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/dist/
+
+# Test artifacts
+*.test
+*.out
+bench_*.txt
+mem.out
+cpu.out
+fuzz/testdata/
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

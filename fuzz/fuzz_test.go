@@ -31,13 +31,13 @@ func FuzzRouter_Find(f *testing.F) {
 	r.Add("POST", "/users", "h")
 
 	f.Fuzz(func(t *testing.T, path string) {
-		// Must not panic — any input is valid from the security boundary.
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("router panicked on path %q: %v", path, r)
 			}
 		}()
-		r.Find("GET", path)  //nolint
+		var buf [8]router.Param
+		r.Find("GET", path, buf[:0]) //nolint
 	})
 }
 

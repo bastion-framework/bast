@@ -5,26 +5,24 @@ import "strings"
 type nodeType uint8
 
 const (
-	nodeStatic   nodeType = iota // literal path segment
-	nodeParam                    // :name — matches one segment
-	nodeWildcard                 // *name — matches rest of path
+	nodeStatic   nodeType = iota
+	nodeParam
+	nodeWildcard
 )
 
 // node is a single node in the radix tree.
-// Children are ordered: static children first, then at most one param child,
-// then at most one wildcard child. This ordering enforces static > param > wildcard priority.
+// Children are ordered: static first, then param, then wildcard.
 type node struct {
 	path     string
 	nType    nodeType
-	name     string // param or wildcard name without : or *
+	name     string
 	children []*node
-	handlers map[string]any // method → HandlerFunc or StreamHandlerFunc
+	handlers map[string]any
 }
 
-// addChild inserts a child, maintaining static-first ordering.
+// addChild inserts a child maintaining static-first ordering.
 func (n *node) addChild(child *node) {
 	if child.nType == nodeStatic {
-		// Static children go before param/wildcard children.
 		insertAt := len(n.children)
 		for i, c := range n.children {
 			if c.nType != nodeStatic {
@@ -50,60 +48,45 @@ func (n *node) insert(path, method string, handler any) {
 		return
 	}
 
-	// Wildcard segment.
 	if path[0] == '*' {
 		name := path[1:]
 		for _, c := range n.children {
-			if c.nType == nodeWildcard {
-				if c.name == name {
-					if c.handlers == nil {
-						c.handlers = make(map[string]any, 4)
-					}
-					c.handlers[method] = handler
-					return
+			if c.nType == nodeWildcard && c.name == name {
+				if c.handlers == nil {
+					c.handlers = make(map[string]any, 4)
 				}
+				c.handlers[method] = handler
+				return
 			}
 		}
-		wc := &node{
-			path:     path,
-			nType:    nodeWildcard,
-			name:     name,
-			handlers: map[string]any{method: handler},
-		}
+		wc := &node{path: path, nType: nodeWildcard, name: name,
+			handlers: map[string]any{method: handler}}
 		n.addChild(wc)
 		return
 	}
 
-	// Param segment.
 	if path[0] == ':' {
 		end := strings.IndexByte(path, '/')
-		var segName string
-		var rest string
+		var segName, rest string
 		if end == -1 {
 			segName = path[1:]
-			rest = ""
 		} else {
 			segName = path[1:end]
 			rest = path[end+1:]
 		}
-
 		for _, c := range n.children {
 			if c.nType == nodeParam && c.name == segName {
 				c.insert(rest, method, handler)
 				return
 			}
 		}
-		pc := &node{
-			path:  ":" + segName,
-			nType: nodeParam,
-			name:  segName,
-		}
+		pc := &node{path: ":" + segName, nType: nodeParam, name: segName}
 		n.addChild(pc)
 		pc.insert(rest, method, handler)
 		return
 	}
 
-	// Static segment: find longest common prefix with existing static children.
+	// Static: find longest common prefix with existing static children.
 	for _, c := range n.children {
 		if c.nType != nodeStatic {
 			continue
@@ -112,65 +95,47 @@ func (n *node) insert(path, method string, handler any) {
 		if lcp == 0 {
 			continue
 		}
-
 		if lcp == len(c.path) {
-			// Existing child is fully matched — continue into it.
 			c.insert(path[lcp:], method, handler)
 			return
 		}
-
 		// Split c at lcp.
-		// c.path = lcp + suffix. Create a new node for suffix.
-		suffix := &node{
-			path:     c.path[lcp:],
-			nType:    nodeStatic,
-			children: c.children,
-			handlers: c.handlers,
-		}
+		suffix := &node{path: c.path[lcp:], nType: nodeStatic,
+			children: c.children, handlers: c.handlers}
 		c.path = c.path[:lcp]
 		c.children = []*node{suffix}
 		c.handlers = nil
-
-		// Insert remaining path into (now-split) c.
 		c.insert(path[lcp:], method, handler)
 		return
 	}
 
-	// No matching child — create a new static child.
-	// But first, split path on the first param or wildcard marker.
 	staticEnd := indexParamOrWildcard(path)
-	if staticEnd == 0 {
-		// Starts with : or * — handled above, should not reach here.
-		// Defensive: insert as-is.
-		child := &node{path: path, nType: nodeStatic}
-		n.addChild(child)
-		child.insert("", method, handler)
-		return
-	}
 	if staticEnd == -1 {
 		staticEnd = len(path)
 	}
-
-	staticPart := path[:staticEnd]
-	rest := path[staticEnd:]
-
-	child := &node{path: staticPart, nType: nodeStatic}
+	if staticEnd == 0 {
+		staticEnd = len(path)
+	}
+	child := &node{path: path[:staticEnd], nType: nodeStatic}
 	n.addChild(child)
-	child.insert(rest, method, handler)
+	child.insert(path[staticEnd:], method, handler)
 }
 
-// search traverses the subtree rooted at n, matching path.
-// params accumulates captured path parameters.
-func (n *node) search(path, method string, params map[string]string) (any, bool, []string) {
+// search traverses the subtree matching path.
+// params is a slice backed by the caller's pre-allocated array.
+// Backtracking restores params to savedLen — no heap allocation.
+// Returns: handler, isMethodNotAllowed, updatedParams, allowedMethods.
+func (n *node) search(path, method string, params []Param) (any, bool, []Param, []string) {
+	savedLen := len(params)
+
 	switch n.nType {
 	case nodeStatic:
 		if !strings.HasPrefix(path, n.path) {
-			return nil, false, nil
+			return nil, false, params, nil
 		}
 		path = path[len(n.path):]
 
 	case nodeParam:
-		// Consume up to the next '/' or end of path.
 		end := strings.IndexByte(path, '/')
 		var val string
 		if end == -1 {
@@ -181,50 +146,42 @@ func (n *node) search(path, method string, params map[string]string) (any, bool,
 			path = path[end+1:]
 		}
 		if val == "" {
-			return nil, false, nil
+			return nil, false, params, nil
 		}
-		params[n.name] = val
+		params = append(params, Param{Key: n.name, Value: val})
 
 	case nodeWildcard:
-		// Consume the rest.
-		params[n.name] = path
+		params = append(params, Param{Key: n.name, Value: path})
 		path = ""
 	}
 
 	if path == "" {
-		// We have consumed the full path. Check for a handler.
 		if h, ok := n.handlers[method]; ok {
-			return h, false, nil
+			return h, false, params, nil
 		}
-		// Check if other methods are registered → MethodNotAllowed.
 		if len(n.handlers) > 0 {
 			allow := make([]string, 0, len(n.handlers))
 			for m := range n.handlers {
 				allow = append(allow, m)
 			}
-			return nil, true, allow
+			return nil, true, params, allow
 		}
-		return nil, false, nil
+		return nil, false, params[:savedLen], nil
 	}
 
-	// Search children in order (static first — guaranteed by addChild).
 	for _, c := range n.children {
-		h, mna, allow := c.search(path, method, params)
+		h, mna, resultParams, allow := c.search(path, method, params)
 		if h != nil || mna {
-			return h, mna, allow
+			return h, mna, resultParams, allow
 		}
-		// Clean up any params added by a failed branch.
-		if c.nType == nodeParam {
-			delete(params, c.name)
-		} else if c.nType == nodeWildcard {
-			delete(params, c.name)
-		}
+		// Failed branch — restore params to before this child was tried.
+		params = params[:len(params)]
 	}
 
-	return nil, false, nil
+	// No child matched — restore params to entry length.
+	return nil, false, params[:savedLen], nil
 }
 
-// commonPrefix returns the length of the longest common prefix of a and b.
 func commonPrefix(a, b string) int {
 	max := len(a)
 	if len(b) < max {
@@ -238,8 +195,6 @@ func commonPrefix(a, b string) int {
 	return max
 }
 
-// indexParamOrWildcard returns the index of the first ':' or '*' in s,
-// or -1 if neither is present.
 func indexParamOrWildcard(s string) int {
 	for i := range len(s) {
 		if s[i] == ':' || s[i] == '*' {

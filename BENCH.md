@@ -5,7 +5,7 @@
 > Date: 2026-06-08 · Commit: see `git log --oneline -1`
 
 Regressions above **5%** on any `BenchmarkApp_*` require justification in the PR.
-The `BenchmarkCtx_AcquireRelease` number **must remain 0 allocs/op**.
+All router and Ctx pool benchmarks **must remain at 0 allocs/op**.
 
 ---
 
@@ -13,15 +13,17 @@ The `BenchmarkCtx_AcquireRelease` number **must remain 0 allocs/op**.
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| `BenchmarkRouter_Static` | 66 | 48 | 1 |
-| `BenchmarkRouter_Param` | 185 | 336 | 2 |
-| `BenchmarkRouter_DeepParam` (5 params) | 290 | 336 | 2 |
-| `BenchmarkRouter_NotFound` | 105 | 48 | 1 |
+| `BenchmarkRouter_Static` | 29 | **0** | **0** |
+| `BenchmarkRouter_Param` | 38 | **0** | **0** |
+| `BenchmarkRouter_DeepParam` (5 params) | 93 | **0** | **0** |
+| `BenchmarkRouter_NotFound` | 64 | **0** | **0** |
 
-The 1 allocation on static routes and the 2 on param routes are from the `Match`
-struct returned by `Find` (the `Params` map). This is expected and unavoidable
-without an arena allocator. The map is pre-sized to 8 keys at pool creation time —
-no growth occurs on typical routes.
+Zero allocations achieved by writing route params directly into a pre-allocated
+`[8]Param` array embedded in `Ctx`. The router receives a caller-provided `[]Param`
+slice backed by that array — no map, no heap allocation on any code path.
+
+Param lookup (`Ctx.Param`) is a linear O(N) scan over the slice.
+For N≤8 this is faster than a hash lookup due to CPU cache locality.
 
 ---
 
@@ -29,17 +31,14 @@ no growth occurs on typical routes.
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| `BenchmarkCtx_AcquireRelease` | 23 | **0** | **0** |
-| `BenchmarkCtx_ParamLookup` | 9 | 0 | 0 |
-| `BenchmarkCtx_Bind` (JSON decode) | 1860 | 2232 | 25 |
+| `BenchmarkCtx_AcquireRelease` | 21 | **0** | **0** |
+| `BenchmarkCtx_ParamLookup` | 3.5 | **0** | **0** |
+| `BenchmarkCtx_Bind` (JSON decode) | 1860 | 2472 | 24 |
 
-`BenchmarkCtx_AcquireRelease` measures the pool round-trip only (`Get` + field
-assignment + `wipe` + `Put`). The request and recorder are pre-created outside
-the loop. **0 allocs/op is a hard requirement** — any PR that breaks this must
-be rejected until fixed.
+`BenchmarkCtx_ParamLookup` dropped from 9 ns → 3.5 ns after the map → slice refactor
+(2.6× faster: linear scan beats hash for small N due to cache locality).
 
-`BenchmarkCtx_Bind` allocations come from `json.Unmarshal` and are unavoidable
-for JSON decoding. This is not on the hot path if the handler short-circuits early.
+`BenchmarkCtx_Bind` allocations are from `json.Unmarshal` — unavoidable for JSON decoding.
 
 ---
 
@@ -47,18 +46,14 @@ for JSON decoding. This is not on the hot path if the handler short-circuits ear
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| `BenchmarkApp_StaticRoute` | 499 | 176 | 5 |
-| `BenchmarkApp_ParamRoute` | 690 | 464 | 6 |
-| `BenchmarkApp_MiddlewareChain` (5 noop MW) | 546 | 176 | 5 |
-| `BenchmarkApp_ErrorBoundary` | 924 | 320 | 9 |
+| `BenchmarkApp_StaticRoute` | 454 | 128 | 4 |
+| `BenchmarkApp_ParamRoute` | 473 | 128 | 4 |
+| `BenchmarkApp_MiddlewareChain` (5 noop MW) | 515 | 128 | 4 |
+| `BenchmarkApp_ErrorBoundary` | 820 | 272 | 8 |
 
-The 5 allocations on a static route come from:
-1. `httptest.ResponseRecorder` write buffer growth (test harness overhead)
-2. JSON marshal of the response envelope (`json.Marshal`)
-3. `map[string]any` in the response envelope
-
-In production with a real `http.ResponseWriter`, items 1 is gone.
-Items 2–3 are on the response serialization path — not the routing/dispatch path.
+Static and param routes now have **identical allocation counts (4)** — the param extraction
+is free. The remaining 4 allocations on the happy path are from response JSON serialization
+(`json.Marshal` of the response envelope), which is unavoidable user-data work.
 
 ---
 
@@ -67,8 +62,8 @@ Items 2–3 are on the response serialization path — not the routing/dispatch 
 | Scope | Threshold | Action |
 |---|---|---|
 | `BenchmarkCtx_AcquireRelease` allocs | must be **0** | Block merge |
+| `BenchmarkRouter_*` allocs | must be **0** | Block merge |
 | `BenchmarkApp_*` ns/op | ≤ 5% regression | Require justification |
-| `BenchmarkRouter_*` ns/op | ≤ 10% regression | Flag in review |
 
 ## How to check for regressions
 
