@@ -1,9 +1,12 @@
 title: Bast
 description: A structured Go framework for building efficient, scalable, and production server-side applications.
-theme: just-the-docs
+remote_theme: just-the-docs/just-the-docs@v0.10.0
 
 url: "https://bastion-framework.github.io"
 baseurl: "/bast"
+
+plugins:
+  - jekyll-remote-theme
 
 aux_links:
   "GitHub":
@@ -11,7 +14,7 @@ aux_links:
 
 aux_links_new_tab: true
 
-footer_content: "Built by <a href=\"https://github.com/kasimlyee\">Kasim Lyee</a> &middot; SUDs Tech &middot; MIT License"
+footer_content: "Author <a href=\"https://github.com/kasimlyee\">Kasim Lyee</a> &middot; SUDs Tech &middot; MIT License"
 
 color_scheme: dark
 
