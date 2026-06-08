@@ -108,6 +108,23 @@ func NewTestCtx() *Ctx {
 	return newTestCtx()
 }
 
+// InitTestCtx wires a writer and request onto a test Ctx. For basttest only.
+func InitTestCtx(c *Ctx, w http.ResponseWriter, r *http.Request) {
+	c.Request = r
+	c.writer = w
+}
+
+// SetTestParam sets a route param on a test Ctx. For basttest only.
+func SetTestParam(c *Ctx, key, value string) {
+	c.params[key] = value
+}
+
+// SetTestBody pre-loads the body buffer on a test Ctx so readBody() is skipped.
+// For basttest only.
+func SetTestBody(c *Ctx, b []byte) {
+	c.bodyBuf = b
+}
+
 // --- Context propagation ---
 
 // Context returns a detached context.Context safe to pass anywhere.
