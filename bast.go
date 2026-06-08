@@ -25,6 +25,7 @@ type Config struct {
 	TrustedProxies  []string
 	ErrorHandler    ErrorHandler
 	Validator       Validator
+	Health          *HealthConfig
 }
 
 // App is the Bast application. Satisfies http.Handler.
@@ -58,12 +59,14 @@ func New(cfg Config) *App {
 
 	proxies := parseCIDRs(cfg.TrustedProxies)
 
-	return &App{
+	app := &App{
 		cfg:        cfg,
 		router:     router.New(),
 		errHandler: errHandler,
 		proxies:    proxies,
 	}
+	app.registerHealthRoutes()
+	return app
 }
 
 // Use registers global middleware. Runs for every request.

@@ -108,6 +108,14 @@ func NewTestCtx() *Ctx {
 	return newTestCtx()
 }
 
+// NewTestCtxWithPath builds a test Ctx with a specific URL path set.
+func NewTestCtxWithPath(path string) *Ctx {
+	c := newTestCtx()
+	req, _ := http.NewRequest(http.MethodGet, path, nil)
+	c.Request = req
+	return c
+}
+
 // InitTestCtx wires a writer and request onto a test Ctx. For basttest only.
 func InitTestCtx(c *Ctx, w http.ResponseWriter, r *http.Request) {
 	c.Request = r
