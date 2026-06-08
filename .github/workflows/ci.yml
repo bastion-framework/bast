@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22", "1.23", "1.24", "1.25"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1 -race -timeout 120s
+
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=1 -run=^$ ./...
+
+      - name: Assert zero allocs on router
+        run: |
+          OUTPUT=$(go test -bench="BenchmarkRouter_|BenchmarkCtx_AcquireRelease" -benchmem -count=1 -run=^$ ./...)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -E "BenchmarkRouter_|BenchmarkCtx_AcquireRelease" | grep -v "0 allocs/op"; then
+            echo "FAIL: hot-path benchmark regressed — expected 0 allocs/op"
+            exit 1
+          fi
+
+  fuzz-short:
+    name: Fuzz (short)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Fuzz router
+        run: go test -fuzz=FuzzRouter_Find -fuzztime=15s ./fuzz/
+
+      - name: Fuzz body parser
+        run: go test -fuzz=FuzzCtx_BindJSON -fuzztime=15s ./fuzz/
+
+      - name: Fuzz config loader
+        run: go test -fuzz=FuzzLoadConfig_StringField -fuzztime=15s ./fuzz/

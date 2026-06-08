@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/bastion-framework/bast/router"
+	"github.com/bastion-framework/bast/internal/router"
 )
 
 const defaultMaxBodySize = 4 * 1024 * 1024 // 4MB

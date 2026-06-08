@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/bastion-framework/bast"
-	"github.com/bastion-framework/bast/router"
+	"github.com/bastion-framework/bast/internal/router"
 )
 
 // ─── Router fuzz ──────────────────────────────────────────────────────────────

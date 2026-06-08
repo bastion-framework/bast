@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/bastion-framework/bast/router"
+	"github.com/bastion-framework/bast/internal/router"
 )
 
 // Config holds app-level settings.
@@ -27,6 +27,7 @@ type Config struct {
 	Validator       Validator
 	Health          *HealthConfig
 	Docs            *DocsConfig
+	Logger          Logger
 }
 
 // App is the Bast application. Satisfies http.Handler.
@@ -41,6 +42,7 @@ type App struct {
 	proxies     []*net.IPNet
 	srv         *http.Server
 	specBuilder *specBuilder
+	logger      Logger
 }
 
 // New creates a new Bast app with the given config.
@@ -58,6 +60,10 @@ func New(cfg Config) *App {
 	if errHandler == nil {
 		errHandler = DefaultErrorHandler
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = NewDefaultLogger()
+	}
 
 	proxies := parseCIDRs(cfg.TrustedProxies)
 
@@ -67,7 +73,9 @@ func New(cfg Config) *App {
 		errHandler:  errHandler,
 		proxies:     proxies,
 		specBuilder: newSpecBuilder(),
+		logger:      logger,
 	}
+	app.logger.OnBoot(bastVersion)
 	app.registerHealthRoutes()
 	app.registerDocsRoutes()
 	return app
@@ -99,6 +107,12 @@ func (a *App) registerModule(m Module, parentPrefix string) {
 	a.moduleNames = append(a.moduleNames, m.Doc.Name)
 	a.specBuilder.addModuleDoc(m.Doc)
 
+	name := m.Doc.Name
+	if name == "" {
+		name = m.Prefix
+	}
+	a.logger.OnModuleRegistered(name, prefix)
+
 	if m.Controller != nil {
 		for _, route := range m.Controller.Routes() {
 			a.registerRoute(route, prefix, m.Middleware, m.Guards, m.Doc)
@@ -125,28 +139,48 @@ func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modG
 	allGuards = append(allGuards, modGuards...)
 	allGuards = append(allGuards, r.Guards...)
 
-	// Record in spec builder — reflection runs at registration time, not request time.
 	a.specBuilder.addRoute(r.Method, fullPattern, r, modDoc, allGuards)
+	a.logger.OnRouteRegistered(r.Method, fullPattern, guardNames(allGuards))
 
 	if r.Stream != nil {
-		// Streaming route — framework steps aside after handing off.
-		streamHandler := r.Stream
-		a.router.Add(r.Method, fullPattern, streamHandler)
+		a.router.Add(r.Method, fullPattern, r.Stream)
 		return
 	}
 
-	// Wrap guards into a middleware that short-circuits on failure.
 	handler := r.Handler
 	if len(allGuards) > 0 {
 		handler = guardMiddleware(allGuards, handler, a.errHandler)
 	}
 
-	// Build the pipeline at registration time.
 	pipeline := buildPipeline(handler, allMW)
+
+	// Per-route body size limit — overrides the global setting for this route.
+	if r.MaxBodySize > 0 {
+		maxBody := r.MaxBodySize
+		inner := pipeline
+		pipeline = func(ctx *Ctx) Response {
+			ctx.maxBodySize = maxBody
+			return inner(ctx)
+		}
+	}
+
+	// Per-route timeout — wraps the context with a deadline so services
+	// that respect ctx.Context() are cancelled when time is up.
+	if r.Timeout > 0 {
+		timeout := r.Timeout
+		inner := pipeline
+		pipeline = func(ctx *Ctx) Response {
+			tctx, cancel := context.WithTimeout(ctx.Context(), timeout)
+			defer cancel()
+			ctx.detachedCtx = tctx
+			return inner(ctx)
+		}
+	}
+
 	a.router.Add(r.Method, fullPattern, pipeline)
 }
 
-// guardMiddleware wraps guards into a HandlerFunc chain.
+// guardMiddleware wraps guards into a HandlerFunc that short-circuits on failure.
 func guardMiddleware(guards []Guard, next HandlerFunc, errHandler ErrorHandler) HandlerFunc {
 	return func(ctx *Ctx) Response {
 		for _, g := range guards {
@@ -160,46 +194,50 @@ func guardMiddleware(guards []Guard, next HandlerFunc, errHandler ErrorHandler) 
 
 // ServeHTTP satisfies http.Handler.
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	ctx := acquireCtx(w, r, a.cfg.MaxBodySize, a.proxies, a.cfg.Validator)
 	defer releaseCtx(ctx)
 
-	// Pass ctx.params (backed by ctx.paramStorage) — router writes params in-place, 0 allocs.
 	match, err := a.router.Find(r.Method, r.URL.Path, ctx.params)
 	if err != nil {
 		var mna *router.MethodNotAllowedError
 		if errors.As(err, &mna) {
-			allow := ""
-			for i, m := range mna.Allow {
-				if i > 0 {
-					allow += ", "
-				}
-				allow += m
-			}
+			allow := strings.Join(mna.Allow, ", ")
 			w.Header().Set("Allow", allow)
 			http.Error(w, "405 method not allowed", http.StatusMethodNotAllowed)
+			a.logger.OnRequest(r.Method, r.URL.Path, http.StatusMethodNotAllowed, time.Since(start), "")
 			return
 		}
 		http.Error(w, "404 not found", http.StatusNotFound)
+		a.logger.OnRequest(r.Method, r.URL.Path, http.StatusNotFound, time.Since(start), "")
 		return
 	}
-	ctx.params = match.Params // already points into ctx.paramStorage
+	ctx.params = match.Params
 
+	var status int
 	switch h := match.Handler.(type) {
 	case StreamHandlerFunc:
+		status = http.StatusOK
 		sctx := newStreamCtx(r.Context(), w, r)
 		h(sctx)
 	case HandlerFunc:
 		resp := h(ctx)
 		if resp.IsError() {
+			a.logger.OnError(ctx, resp.Err())
 			resp = a.errHandler(ctx, resp.Err())
 		}
 		writeResponse(w, resp)
+		status = resp.Status()
 	default:
 		http.Error(w, "500 internal server error", http.StatusInternalServerError)
+		status = http.StatusInternalServerError
 	}
+
+	a.logger.OnRequest(r.Method, r.URL.Path, status, time.Since(start), ctx.IP())
 }
 
 // Listen starts the HTTP server on the configured port.
+// Uses net.Listen so OnReady fires after the port is bound, before first connections.
 func (a *App) Listen() error {
 	port := a.cfg.Port
 	if port == 0 {
@@ -210,8 +248,15 @@ func (a *App) Listen() error {
 		return err
 	}
 
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return fmt.Errorf("bast: listen: %w", err)
+	}
+
+	a.logger.OnListening(port)
+	a.runReadyHooks()
+
 	a.srv = &http.Server{
-		Addr:           fmt.Sprintf(":%d", port),
 		Handler:        a,
 		ReadTimeout:    a.cfg.ReadTimeout,
 		WriteTimeout:   a.cfg.WriteTimeout,
@@ -219,14 +264,15 @@ func (a *App) Listen() error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	if err := a.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("bast: listen: %w", err)
+	if err := a.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("bast: serve: %w", err)
 	}
 	return nil
 }
 
 // Shutdown gracefully shuts down the server.
 func (a *App) Shutdown(ctx context.Context) error {
+	a.logger.OnShutdown()
 	if a.srv == nil {
 		return nil
 	}
@@ -245,8 +291,7 @@ func (a *App) runInitHooks() error {
 			cancel()
 			if err != nil {
 				name := a.moduleNames[i]
-				slog.Error("FATAL: module OnInit failed — refusing to start",
-					"module", name, "err", err)
+				a.logger.Error("FATAL: %s.OnInit failed — refusing to start: %v", name, err)
 				return fmt.Errorf("bast: %s.OnInit: %w", name, err)
 			}
 		}
@@ -254,13 +299,20 @@ func (a *App) runInitHooks() error {
 	return nil
 }
 
+func (a *App) runReadyHooks() {
+	for _, m := range a.modules {
+		if h, ok := m.Controller.(Hooks); ok {
+			h.OnReady()
+		}
+	}
+}
+
 func (a *App) runShutdownHooks(ctx context.Context) {
 	for i := len(a.modules) - 1; i >= 0; i-- {
 		if h, ok := a.modules[i].Controller.(Hooks); ok {
 			hookCtx, cancel := context.WithTimeout(ctx, a.cfg.HookTimeout)
 			if err := h.OnShutdown(hookCtx); err != nil {
-				slog.Error("shutdown hook failed",
-					"module", a.moduleNames[i], "err", err)
+				a.logger.Error("shutdown hook failed for %s: %v", a.moduleNames[i], err)
 			}
 			cancel()
 		}

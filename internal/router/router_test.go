@@ -3,7 +3,7 @@ package router_test
 import (
 	"testing"
 
-	"github.com/bastion-framework/bast/router"
+	"github.com/bastion-framework/bast/internal/router"
 )
 
 // find is a test helper that wraps Find with a pre-allocated param buffer.
