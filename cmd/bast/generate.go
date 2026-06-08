@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,12 @@ import (
 )
 
 // runGenerateModule generates the 5 files that make up a Bast module.
+// dir should already be the target directory (e.g. "modules/users").
 func runGenerateModule(name, dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+
 	pkg := toPackageName(name)
 	title := toTitle(name)
 	data := map[string]string{
@@ -37,7 +43,11 @@ func runGenerateModule(name, dir string) error {
 }
 
 // runGenerateGuard generates a single guard file.
+// dir should already be the target directory (e.g. "shared/guards").
 func runGenerateGuard(name, dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
 	pkg := toPackageName(name)
 	title := toTitle(name)
 	data := map[string]string{"Pkg": pkg, "Title": title, "Name": name}
@@ -45,7 +55,11 @@ func runGenerateGuard(name, dir string) error {
 }
 
 // runGenerateService generates a single shared service file.
+// dir should already be the target directory (e.g. "shared/services").
 func runGenerateService(name, dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
 	pkg := toPackageName(name)
 	title := toTitle(name)
 	data := map[string]string{"Pkg": pkg, "Title": title, "Name": name}
@@ -293,6 +307,109 @@ var {{.Title}}Guard = bast.GuardFunc(func(ctx *bast.Ctx) error {
 	return nil
 })
 `
+
+
+// injectModuleIntoMain adds the import and app.Register call for a new module
+// to the nearest main.go walking up from the current directory.
+func injectModuleIntoMain(name string) error {
+	mainPath, err := findFile("main.go")
+	if err != nil {
+		return fmt.Errorf("main.go not found")
+	}
+	modPath, err := readModulePath(filepath.Dir(mainPath))
+	if err != nil {
+		return fmt.Errorf("go.mod not found")
+	}
+
+	pkg := toPackageName(name)
+	importPath := modPath + "/modules/" + name
+
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		return fmt.Errorf("read main.go: %w", err)
+	}
+
+	src := string(data)
+
+	// Skip if already registered.
+	if strings.Contains(src, importPath) {
+		return nil
+	}
+
+	src = addImport(src, importPath)
+	src = addToRegister(src, pkg+".NewModule()")
+
+	return os.WriteFile(mainPath, []byte(src), 0644)
+}
+
+// findFile walks up from CWD looking for a file by name (up to 4 levels).
+func findFile(name string) (string, error) {
+	dir, _ := os.Getwd()
+	for range 5 {
+		candidate := filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("%s not found", name)
+}
+
+// readModulePath extracts the module path from go.mod in dir.
+func readModulePath(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")), nil
+		}
+	}
+	return "", fmt.Errorf("module directive not found")
+}
+
+// addImport inserts an import path before the closing ) of the import block.
+func addImport(src, importPath string) string {
+	importLine := "\t\"" + importPath + "\""
+	if strings.Contains(src, importLine) {
+		return src
+	}
+	// Find the import block's closing ).
+	importBlock := strings.Index(src, "import (")
+	if importBlock == -1 {
+		return src
+	}
+	closing := strings.Index(src[importBlock:], "\n)")
+	if closing == -1 {
+		return src
+	}
+	pos := importBlock + closing
+	return src[:pos] + "\n" + importLine + src[pos:]
+}
+
+// addToRegister inserts a NewModule() call inside app.Register(...).
+func addToRegister(src, call string) string {
+	if strings.Contains(src, call) {
+		return src
+	}
+	registerIdx := strings.Index(src, "app.Register(")
+	if registerIdx == -1 {
+		return src
+	}
+	// Find the closing ) of app.Register — look for the first \n\t)
+	rest := src[registerIdx:]
+	closing := strings.Index(rest, "\n\t)")
+	if closing == -1 {
+		return src
+	}
+	pos := registerIdx + closing
+	return src[:pos] + "\n\t\t" + call + "," + src[pos:]
+}
 
 // ─── Name helpers ─────────────────────────────────────────────────────────────
 

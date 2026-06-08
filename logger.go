@@ -99,9 +99,10 @@ func (l *defaultLogger) OnModuleRegistered(name, prefix string) {
 }
 
 func (l *defaultLogger) OnRouteRegistered(method, path string, guards []string) {
-	methodColor := methodColor(method, l.colors)
+	// Pad the raw method name BEFORE colorizing — ANSI codes add invisible chars
+	// that break fmt.Sprintf width calculation.
 	line := l.tag() + "   " +
-		fmt.Sprintf("%-8s", methodColor) +
+		l.colorize(fmt.Sprintf("%-8s", method), methodANSICode(method)) +
 		l.colorize(path, ansiWhite)
 	for _, g := range guards {
 		line += "  " + l.colorize("["+g+"]", ansiMagenta)
@@ -150,8 +151,8 @@ func (l *defaultLogger) OnRequest(method, path string, status int, dur time.Dura
 	durStr := formatDur(dur)
 
 	line := l.tag() + " " +
-		fmt.Sprintf("%-8s", methodColor(method, l.colors)) +
-		fmt.Sprintf("%-30s", l.colorize(path, ansiWhite)) +
+		l.colorize(fmt.Sprintf("%-8s", method), methodANSICode(method)) +
+		fmt.Sprintf("%-30s", path) +
 		l.colorize(fmt.Sprintf("%-6s", statusStr), statusColor) +
 		l.colorize(fmt.Sprintf("%-10s", durStr), ansiDim)
 	if ip != "" {
@@ -183,27 +184,24 @@ func (l *defaultLogger) Debug(msg string, args ...any) {
 	l.print(l.tag() + " " + l.colorize("[DEBUG] ", ansiGray) + fmt.Sprintf(msg, maybeArgs(args)...))
 }
 
-// methodColor returns a padded, optionally colored HTTP method string.
-func methodColor(method string, colors bool) string {
-	if !colors {
-		return method
-	}
-	var code string
+// methodANSICode returns the ANSI color code for an HTTP method.
+// Always pad the method string BEFORE passing to colorize so that
+// invisible ANSI bytes don't break fmt.Sprintf width calculations.
+func methodANSICode(method string) string {
 	switch method {
 	case "GET":
-		code = ansiGreen
+		return ansiGreen
 	case "POST":
-		code = ansiYellow
+		return ansiYellow
 	case "PUT":
-		code = ansiBlue
+		return ansiBlue
 	case "PATCH":
-		code = ansiMagenta
+		return ansiMagenta
 	case "DELETE":
-		code = ansiRed
+		return ansiRed
 	default:
-		code = ansiWhite
+		return ansiWhite
 	}
-	return code + method + ansiReset
 }
 
 func formatDur(d time.Duration) string {

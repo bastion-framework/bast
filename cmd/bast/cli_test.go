@@ -51,7 +51,8 @@ func TestNew_GoModContainsAppName(t *testing.T) {
 }
 
 func TestGenerateModule_CreatesAllFiles(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "modules", "payments")
 	if err := runGenerateModule("payments", dir); err != nil {
 		t.Fatalf("runGenerateModule: %v", err)
 	}
@@ -64,7 +65,8 @@ func TestGenerateModule_CreatesAllFiles(t *testing.T) {
 }
 
 func TestGenerateModule_ModuleFileHasCorrectPackage(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "modules", "orders")
 	_ = runGenerateModule("orders", dir)
 
 	content := readFile(t, filepath.Join(dir, "orders.module.go"))
@@ -77,7 +79,8 @@ func TestGenerateModule_ModuleFileHasCorrectPackage(t *testing.T) {
 }
 
 func TestGenerateModule_ControllerImplementsInterface(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "modules", "users")
 	_ = runGenerateModule("users", dir)
 
 	content := readFile(t, filepath.Join(dir, "users.controller.go"))
@@ -87,7 +90,8 @@ func TestGenerateModule_ControllerImplementsInterface(t *testing.T) {
 }
 
 func TestGenerateGuard_CreatesFile(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "shared", "guards")
 	if err := runGenerateGuard("admin", dir); err != nil {
 		t.Fatalf("runGenerateGuard: %v", err)
 	}
@@ -100,7 +104,8 @@ func TestGenerateGuard_CreatesFile(t *testing.T) {
 }
 
 func TestGenerateService_CreatesFile(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "shared", "services")
 	if err := runGenerateService("token", dir); err != nil {
 		t.Fatalf("runGenerateService: %v", err)
 	}
@@ -112,13 +117,71 @@ func TestGenerateService_CreatesFile(t *testing.T) {
 	}
 }
 
+func TestGenerateModule_InjectsIntoMain(t *testing.T) {
+	root := t.TempDir()
+
+	// Write a minimal go.mod and main.go simulating a real project.
+	writeFile(t, filepath.Join(root, "go.mod"), "module myapp\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"github.com/bastion-framework/bast"
+	"myapp/modules/todos"
+)
+
+func main() {
+	app := bast.New(bast.Config{})
+	app.Register(
+		todos.NewModule(),
+	)
+	app.Listen()
+}
+`)
+
+	// Change to root so findFile walks from there.
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+	os.Chdir(root)
+
+	dir := filepath.Join(root, "modules", "payments")
+	if err := runGenerateModule("payments", dir); err != nil {
+		t.Fatalf("runGenerateModule: %v", err)
+	}
+	if err := injectModuleIntoMain("payments"); err != nil {
+		t.Fatalf("injectModuleIntoMain: %v", err)
+	}
+
+	content := readFile(t, filepath.Join(root, "main.go"))
+
+	if !strings.Contains(content, `"myapp/modules/payments"`) {
+		t.Errorf("import not added to main.go:\n%s", content)
+	}
+	if !strings.Contains(content, "payments.NewModule()") {
+		t.Errorf("NewModule() not added to app.Register:\n%s", content)
+	}
+	// Existing todos import and registration must be preserved.
+	if !strings.Contains(content, `"myapp/modules/todos"`) {
+		t.Errorf("existing todos import removed from main.go:\n%s", content)
+	}
+	if !strings.Contains(content, "todos.NewModule()") {
+		t.Errorf("existing todos registration removed from main.go:\n%s", content)
+	}
+}
+
 // helpers
 
+// mustExist checks that a file exists. If rel is provided, it is joined with base.
+// If base already is the full path to the file's directory, pass "" for rel.
 func mustExist(t *testing.T, base, rel string) {
 	t.Helper()
-	full := filepath.Join(base, filepath.FromSlash(rel))
+	var full string
+	if rel == "" {
+		full = base
+	} else {
+		full = filepath.Join(base, filepath.FromSlash(rel))
+	}
 	if _, err := os.Stat(full); os.IsNotExist(err) {
-		t.Errorf("expected file %s to exist", rel)
+		t.Errorf("expected file to exist: %s", full)
 	}
 }
 
@@ -129,4 +192,11 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }

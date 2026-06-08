@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -28,21 +29,35 @@ func main() {
 		}
 		kind := os.Args[2]
 		name := os.Args[3]
-		var err error
+		var (
+			err    error
+			outDir string
+		)
 		switch kind {
 		case "module":
-			err = runGenerateModule(name, ".")
+			outDir = filepath.Join("modules", name)
+			err = runGenerateModule(name, outDir)
+			if err == nil {
+				if injectErr := injectModuleIntoMain(name); injectErr != nil {
+					fmt.Printf("  ⚠ could not auto-register in main.go: %v\n", injectErr)
+					fmt.Printf("  add manually: %s.NewModule() inside app.Register(...)\n", toPackageName(name))
+				} else {
+					fmt.Printf("  ↳ registered in main.go\n")
+				}
+			}
 		case "guard":
-			err = runGenerateGuard(name, ".")
+			outDir = filepath.Join("shared", "guards")
+			err = runGenerateGuard(name, outDir)
 		case "service":
-			err = runGenerateService(name, ".")
+			outDir = filepath.Join("shared", "services")
+			err = runGenerateService(name, outDir)
 		default:
 			fatalf("unknown generate target %q — use module, guard, or service", kind)
 		}
 		if err != nil {
 			fatalf("bast generate %s: %v", kind, err)
 		}
-		fmt.Printf("✓ Generated %s/%s\n", kind, name)
+		fmt.Printf("✓ Generated %s/%s → %s\n", kind, name, outDir)
 
 	case "help", "--help", "-h":
 		printUsage()

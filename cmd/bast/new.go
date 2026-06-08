@@ -94,9 +94,12 @@ func main() {
 		},
 	})
 
+	// RequestID and Recover are always recommended.
+	// Logger middleware is optional — the framework already logs every
+	// request via the built-in [Bast] logger. Add middleware.Logger only
+	// if you want a separate slog-based log stream.
 	app.Use(
 		middleware.RequestID,
-		middleware.Logger,
 		middleware.Recover,
 		middleware.CORS(middleware.CORSConfig{
 			AllowedOrigins: []string{"*"},
@@ -111,8 +114,6 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		slog.Info("bast listening", "port", 8080)
-		slog.Info("swagger UI", "url", "http://localhost:8080/docs")
 		if err := app.Listen(); err != nil {
 			slog.Error("server error", "err", err)
 		}
@@ -122,7 +123,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = app.Shutdown(ctx)
-	slog.Info("shutdown complete")
 }
 `
 
@@ -170,25 +170,47 @@ func (c *controller) Routes() []bast.Route {
 		bast.GET("/", c.List, bast.WithDoc(bast.Doc{
 			Summary: "List all todos",
 			Tags:    []string{"Todos"},
+			Returns: bast.Returns{
+				200: bast.Body[[]Todo](),
+			},
 		})),
 		bast.GET("/:id", c.Get, bast.WithDoc(bast.Doc{
 			Summary: "Get a todo by ID",
 			Tags:    []string{"Todos"},
 			Params:  []bast.Param{bast.PathParam("id", "Todo ID")},
+			Returns: bast.Returns{
+				200: bast.Body[Todo](),
+				404: bast.Body[bast.BastError](),
+			},
 		})),
 		bast.POST("/", c.Create, bast.WithDoc(bast.Doc{
 			Summary: "Create a todo",
 			Tags:    []string{"Todos"},
+			Body:    bast.Body[CreateTodoRequest](),
+			Returns: bast.Returns{
+				201: bast.Body[Todo](),
+				400: bast.Body[bast.BastError](),
+			},
 		})),
 		bast.PATCH("/:id", c.Update, bast.WithDoc(bast.Doc{
 			Summary: "Update a todo",
 			Tags:    []string{"Todos"},
 			Params:  []bast.Param{bast.PathParam("id", "Todo ID")},
+			Body:    bast.Body[UpdateTodoRequest](),
+			Returns: bast.Returns{
+				200: bast.Body[Todo](),
+				400: bast.Body[bast.BastError](),
+				404: bast.Body[bast.BastError](),
+			},
 		})),
 		bast.DELETE("/:id", c.Delete, bast.WithDoc(bast.Doc{
 			Summary: "Delete a todo",
 			Tags:    []string{"Todos"},
 			Params:  []bast.Param{bast.PathParam("id", "Todo ID")},
+			Returns: bast.Returns{
+				204: nil,
+				404: bast.Body[bast.BastError](),
+			},
 		})),
 	}
 }

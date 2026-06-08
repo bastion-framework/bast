@@ -294,6 +294,8 @@ func (c *Ctx) RawBody() ([]byte, error) {
 }
 
 // BindJSON decodes JSON body into v without running validation.
+// Returns a 400 BastError on malformed JSON so the error boundary
+// produces a proper Bad Request response instead of a 500.
 func (c *Ctx) BindJSON(v any) error {
 	if v == nil {
 		return fmt.Errorf("bast: BindJSON: target must not be nil")
@@ -302,12 +304,14 @@ func (c *Ctx) BindJSON(v any) error {
 		return err
 	}
 	if err := json.Unmarshal(c.bodyBuf, v); err != nil {
-		return fmt.Errorf("bast: decode JSON: %w", err)
+		return ErrInvalidBody(err.Error())
 	}
 	return nil
 }
 
 // Bind decodes and validates the request body into v.
+// Returns a 400 BastError on malformed JSON, or a ValidationError on
+// failed struct validation — both flow cleanly through the error boundary.
 func (c *Ctx) Bind(v any) error {
 	if v == nil {
 		return fmt.Errorf("bast: Bind: target must not be nil")
@@ -316,7 +320,7 @@ func (c *Ctx) Bind(v any) error {
 		return err
 	}
 	if err := json.Unmarshal(c.bodyBuf, v); err != nil {
-		return fmt.Errorf("bast: decode JSON: %w", err)
+		return ErrInvalidBody(err.Error())
 	}
 	if c.validator != nil {
 		if err := c.validator.Validate(v); err != nil {
