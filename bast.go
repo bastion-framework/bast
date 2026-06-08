@@ -26,6 +26,7 @@ type Config struct {
 	ErrorHandler    ErrorHandler
 	Validator       Validator
 	Health          *HealthConfig
+	Docs            *DocsConfig
 }
 
 // App is the Bast application. Satisfies http.Handler.
@@ -39,6 +40,7 @@ type App struct {
 	moduleNames []string
 	proxies     []*net.IPNet
 	srv         *http.Server
+	specBuilder *specBuilder
 }
 
 // New creates a new Bast app with the given config.
@@ -60,12 +62,14 @@ func New(cfg Config) *App {
 	proxies := parseCIDRs(cfg.TrustedProxies)
 
 	app := &App{
-		cfg:        cfg,
-		router:     router.New(),
-		errHandler: errHandler,
-		proxies:    proxies,
+		cfg:         cfg,
+		router:      router.New(),
+		errHandler:  errHandler,
+		proxies:     proxies,
+		specBuilder: newSpecBuilder(),
 	}
 	app.registerHealthRoutes()
+	app.registerDocsRoutes()
 	return app
 }
 
@@ -93,10 +97,11 @@ func (a *App) registerModule(m Module, parentPrefix string) {
 	prefix := parentPrefix + m.Prefix
 	a.modules = append(a.modules, m)
 	a.moduleNames = append(a.moduleNames, m.Doc.Name)
+	a.specBuilder.addModuleDoc(m.Doc)
 
 	if m.Controller != nil {
 		for _, route := range m.Controller.Routes() {
-			a.registerRoute(route, prefix, m.Middleware, m.Guards)
+			a.registerRoute(route, prefix, m.Middleware, m.Guards, m.Doc)
 		}
 	}
 
@@ -105,7 +110,7 @@ func (a *App) registerModule(m Module, parentPrefix string) {
 	}
 }
 
-func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modGuards []Guard) {
+func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modGuards []Guard, modDoc ModuleDoc) {
 	fullPattern := prefix + r.Pattern
 
 	// Build the full middleware chain: global → module → route.
@@ -119,6 +124,9 @@ func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modG
 	allGuards = append(allGuards, a.guards...)
 	allGuards = append(allGuards, modGuards...)
 	allGuards = append(allGuards, r.Guards...)
+
+	// Record in spec builder — reflection runs at registration time, not request time.
+	a.specBuilder.addRoute(r.Method, fullPattern, r, modDoc, allGuards)
 
 	if r.Stream != nil {
 		// Streaming route — framework steps aside after handing off.
