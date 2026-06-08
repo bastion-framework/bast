@@ -225,6 +225,48 @@ func TestRouter_DeepNestedParams(t *testing.T) {
 	}
 }
 
+// ─── Benchmarks ───────────────────────────────────────────────────────────────
+
+func BenchmarkRouter_Static(b *testing.B) {
+	r := router.New()
+	r.Add("GET", "/users/me", "h")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		r.Find("GET", "/users/me") //nolint
+	}
+}
+
+func BenchmarkRouter_Param(b *testing.B) {
+	r := router.New()
+	r.Add("GET", "/users/:id", "h")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		r.Find("GET", "/users/42") //nolint
+	}
+}
+
+func BenchmarkRouter_DeepParam(b *testing.B) {
+	r := router.New()
+	r.Add("GET", "/a/:b/c/:d/e/:f/g/:h/i/:j", "h")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		r.Find("GET", "/a/1/c/2/e/3/g/4/i/5") //nolint
+	}
+}
+
+func BenchmarkRouter_NotFound(b *testing.B) {
+	r := router.New()
+	r.Add("GET", "/users/:id", "h")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		r.Find("GET", "/missing/path") //nolint
+	}
+}
+
 func TestRouter_WildcardAfterStatic(t *testing.T) {
 	r := router.New()
 	r.Add("GET", "/files/docs", "hDocs")

@@ -108,6 +108,13 @@ func NewTestCtx() *Ctx {
 	return newTestCtx()
 }
 
+// BenchAcquireCtx and BenchReleaseCtx expose the pool for benchmark tests.
+func BenchAcquireCtx(w http.ResponseWriter, r *http.Request) *Ctx {
+	return acquireCtx(w, r, defaultMaxBodySize, nil, nil)
+}
+
+func BenchReleaseCtx(c *Ctx) { releaseCtx(c) }
+
 // NewTestCtxWithPath builds a test Ctx with a specific URL path set.
 func NewTestCtxWithPath(path string) *Ctx {
 	c := newTestCtx()
