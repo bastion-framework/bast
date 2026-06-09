@@ -130,7 +130,7 @@ var tmplGoMod = `module {{.App}}
 
 go 1.22
 
-require github.com/bastion-framework/bast v0.1.0
+require github.com/bastion-framework/bast v0.1.1
 `
 
 var tmplTodosModule = `package todos
