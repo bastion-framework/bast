@@ -143,7 +143,8 @@ func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modG
 	a.logger.OnRouteRegistered(r.Method, fullPattern, guardNames(allGuards))
 
 	if r.Stream != nil {
-		a.router.Add(r.Method, fullPattern, r.Stream)
+		sp := streamPipeline{guards: allGuards, handler: r.Stream}
+		a.router.Add(r.Method, fullPattern, sp)
 		return
 	}
 
@@ -178,6 +179,14 @@ func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modG
 	}
 
 	a.router.Add(r.Method, fullPattern, pipeline)
+}
+
+// streamPipeline pairs a StreamHandlerFunc with its guard chain.
+// Stored in the router in place of a bare StreamHandlerFunc so that
+// ServeHTTP can run guards synchronously before handing off to the handler.
+type streamPipeline struct {
+	guards  []Guard
+	handler StreamHandlerFunc
 }
 
 // guardMiddleware wraps guards into a HandlerFunc that short-circuits on failure.
@@ -216,10 +225,29 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var status int
 	switch h := match.Handler.(type) {
-	case StreamHandlerFunc:
-		status = http.StatusOK
-		sctx := newStreamCtx(r.Context(), w, r)
-		h(sctx)
+	case streamPipeline:
+		blocked := false
+		for _, g := range h.guards {
+			if err := g.Check(ctx); err != nil {
+				resp := a.errHandler(ctx, err)
+				writeResponse(w, resp)
+				status = resp.Status()
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			sctx := newStreamCtx(r.Context(), w, r)
+			if len(ctx.params) > 0 {
+				sctx.params = make([]router.Param, len(ctx.params))
+				copy(sctx.params, ctx.params)
+			}
+			for k, v := range ctx.store {
+				sctx.store[k] = v
+			}
+			h.handler(sctx)
+			status = http.StatusOK
+		}
 	case HandlerFunc:
 		resp := h(ctx)
 		if resp.IsError() {

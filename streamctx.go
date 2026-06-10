@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/bastion-framework/bast/internal/router"
 )
 
 // StreamCtx is the context for streaming handlers.
@@ -16,6 +18,8 @@ type StreamCtx struct {
 	writer  http.ResponseWriter
 	flusher http.Flusher
 	bw      *bufio.Writer
+	params  []router.Param
+	store   map[string]any
 }
 
 // newStreamCtx creates a StreamCtx for a streaming connection.
@@ -24,6 +28,7 @@ func newStreamCtx(ctx context.Context, w http.ResponseWriter, r *http.Request) *
 		Context: ctx,
 		Request: r,
 		writer:  w,
+		store:   make(map[string]any, 8),
 	}
 	if f, ok := w.(http.Flusher); ok {
 		sc.flusher = f
@@ -66,4 +71,58 @@ func (s *StreamCtx) Flush() {
 // Equivalent to StreamCtx.Done() via the embedded context.
 func (s *StreamCtx) Closed() <-chan struct{} {
 	return s.Done()
+}
+
+// Param returns a URL path parameter by name.
+// e.g. STREAM("/:id/events", ...) → sctx.Param("id") == "42" for /42/events
+func (s *StreamCtx) Param(key string) string {
+	for i := range s.params {
+		if s.params[i].Key == key {
+			return s.params[i].Value
+		}
+	}
+	return ""
+}
+
+// Get retrieves a value from the request-scoped store.
+// Values are populated by guards that ran before the stream handler.
+func (s *StreamCtx) Get(key string) (any, bool) {
+	v, ok := s.store[key]
+	return v, ok
+}
+
+// Set stores a value in the request-scoped store.
+func (s *StreamCtx) Set(key string, val any) {
+	s.store[key] = val
+}
+
+// MustGet retrieves a value and panics if not found.
+// Use only when a guard guarantees the value was set.
+func (s *StreamCtx) MustGet(key string) any {
+	v, ok := s.store[key]
+	if !ok {
+		panic(fmt.Sprintf("bast: MustGet: key %q not found in store", key))
+	}
+	return v
+}
+
+// --- Test helpers (exported for basttest only) ---
+
+// NewTestStreamCtx creates a StreamCtx outside the pool for unit testing stream handlers.
+// Never pool or reuse a test StreamCtx.
+func NewTestStreamCtx() *StreamCtx {
+	return &StreamCtx{
+		Context: context.Background(),
+		store:   make(map[string]any, 8),
+	}
+}
+
+// SetStreamTestParam sets a route path parameter on a test StreamCtx. For basttest only.
+func SetStreamTestParam(s *StreamCtx, key, value string) {
+	s.params = append(s.params, router.Param{Key: key, Value: value})
+}
+
+// SetStreamTestStore sets a value in the store of a test StreamCtx. For basttest only.
+func SetStreamTestStore(s *StreamCtx, key string, val any) {
+	s.store[key] = val
 }
