@@ -174,6 +174,22 @@ When `AuthGuard` is registered on a module, Bast automatically marks all routes 
 
 ---
 
+## Guards on streaming routes
+
+Guards apply to `bast.STREAM` routes using the same registration points and execution order as regular routes. If a guard returns an error, Bast writes the HTTP error response and the stream handler is **never called**.
+
+```go
+bast.Module{
+    Prefix:  "/notifications",
+    Guards:  []bast.Guard{guards.AuthGuard}, // runs before ALL routes, including STREAM
+    Controller: notificationsController,
+}
+```
+
+Values set by guards via `ctx.Set` are forwarded to `*StreamCtx` automatically — access them with `sctx.Get` or `sctx.MustGet` inside the stream handler. See [Streaming](./streaming.md) for the full pattern.
+
+---
+
 ## Guard vs Middleware
 
 | | Guard | Middleware |

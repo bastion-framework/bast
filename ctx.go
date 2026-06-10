@@ -17,6 +17,18 @@ import (
 
 const defaultMaxBodySize = 4 * 1024 * 1024 // 4MB
 
+// nullEnvelope is the pre-baked JSON envelope for nil data.
+// Returned directly from jsonBody when data == nil — zero allocations.
+var nullEnvelope = []byte(`{"data":null,"meta":null}`)
+
+// jsonEnvelope is the response envelope type, pooled to avoid heap escapes.
+type jsonEnvelope struct {
+	Data any `json:"data"`
+	Meta any `json:"meta"`
+}
+
+var envPool = sync.Pool{New: func() any { return new(jsonEnvelope) }}
+
 // Ctx is the request context passed to every Bast handler.
 // Pooled via sync.Pool — reset and reused after every request.
 //
@@ -433,10 +445,14 @@ func MustGet[T any](ctx *Ctx, key string) T {
 // --- Response builders ---
 
 func (c *Ctx) jsonBody(data any) ([]byte, error) {
-	b, err := json.Marshal(struct {
-		Data any `json:"data"`
-		Meta any `json:"meta"`
-	}{Data: data, Meta: nil})
+	if data == nil {
+		return nullEnvelope, nil
+	}
+	env := envPool.Get().(*jsonEnvelope)
+	env.Data = data
+	b, err := json.Marshal(env)
+	env.Data = nil // clear before returning to pool to avoid extending data lifetime
+	envPool.Put(env)
 	if err != nil {
 		return nil, fmt.Errorf("bast: marshal response: %w", err)
 	}

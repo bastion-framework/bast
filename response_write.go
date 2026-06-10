@@ -35,8 +35,8 @@ func writeResponse(w http.ResponseWriter, resp Response) {
 		return
 	}
 
-	for k, v := range resp.Headers() {
-		w.Header().Set(k, v)
+	for _, h := range resp.headers {
+		w.Header().Set(h.key, h.value)
 	}
 	for _, c := range resp.Cookies() {
 		http.SetCookie(w, c)
