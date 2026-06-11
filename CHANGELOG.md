@@ -8,8 +8,10 @@ This project follows [Semantic Versioning](https://semver.org) and the format is
 
 ## [Unreleased]
 
-### Added
-- Nothing yet.
+### Fixed
+
+- *(stream)* Strean route guard + path param gaps ([`686ba5e`](https://github.com/bastion-framework/bast/commit/686ba5ecbf6118148af2a0ecf4712894a14dffc6))
+- Address some risk issues ([`1d6629a`](https://github.com/bastion-framework/bast/commit/1d6629a739526bc48ff9b879a56c10fe006be3a2))
 
 ---
 

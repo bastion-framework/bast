@@ -59,6 +59,9 @@ func main() {
 		}
 		fmt.Printf("✓ Generated %s/%s → %s\n", kind, name, outDir)
 
+	case "version", "--version", "-v":
+		fmt.Println(resolveVersion())
+
 	case "help", "--help", "-h":
 		printUsage()
 

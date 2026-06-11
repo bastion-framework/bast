@@ -1,0 +1,54 @@
+name: Release
+
+'on':
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build binaries, generate changelog, create GitHub release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so git-cliff can read all tags
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Build CLI binaries
+        run: |
+          VERSION=${{ github.ref_name }}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/bast-linux-amd64      ./cmd/bast/
+          GOOS=linux   GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/bast-linux-arm64      ./cmd/bast/
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/bast-darwin-amd64     ./cmd/bast/
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/bast-darwin-arm64     ./cmd/bast/
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/bast-windows-amd64.exe ./cmd/bast/
+
+      - name: Generate changelog for this tag
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: BODY.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: BODY.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: dist/*

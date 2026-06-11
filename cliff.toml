@@ -1,0 +1,66 @@
+[changelog]
+# The header is only written when generating a brand-new file (not on prepend).
+header = """
+# Changelog
+
+All notable changes to Bast are documented here.
+
+This project follows [Semantic Versioning](https://semver.org) and the format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+"""
+
+body = """
+{% if version %}\
+## [{{ version }}] — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}\
+
+### {{ group }}
+
+{% for commit in commits %}\
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{{ commit.message | upper_first }} ([`{{ commit.id | truncate(length=7, end="") }}`](https://github.com/bastion-framework/bast/commit/{{ commit.id }}))
+{% endfor %}\
+{% endfor %}
+---
+"""
+
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+
+# Only conventional commits appear in the changelog.
+# Non-conventional commits (e.g. "update", "Updated Stream roots") are silently dropped.
+# From now on use: feat|fix|perf|refactor|docs|test|chore prefix on every commit.
+filter_unconventional = true
+
+split_commits = false
+protect_breaking_commits = false
+
+# Only recognise tags with a v-prefix (ignores the bare "0.1.0" tag).
+tag_pattern = "v[0-9].*"
+
+topo_order = false
+sort_commits = "oldest"
+
+commit_parsers = [
+    { message = "^feat",     group = "Added"         },
+    { message = "^fix",      group = "Fixed"         },
+    { message = "^perf",     group = "Performance"   },
+    { message = "^refactor", group = "Changed"       },
+    { message = "^docs",     group = "Documentation" },
+    { message = "^test",     group = "Testing"       },
+    { message = "^security", group = "Security"      },
+    { message = "^chore",    skip  = true            },
+    { message = "^ci",       skip  = true            },
+    { message = "^build",    skip  = true            },
+    { message = "^Merge",    skip  = true            },
+]
+
+link_parsers = [
+    { pattern = "#(\\d+)", href = "https://github.com/bastion-framework/bast/issues/$1" },
+]

@@ -22,7 +22,7 @@ func runNew(appName, dir string) error {
 		}
 	}
 
-	data := map[string]string{"App": appName}
+	data := map[string]string{"App": appName, "Version": resolveVersion()}
 
 	files := []struct {
 		path string
@@ -130,7 +130,7 @@ var tmplGoMod = `module {{.App}}
 
 go 1.22
 
-require github.com/bastion-framework/bast v0.1.1
+require github.com/bastion-framework/bast {{.Version}}
 `
 
 var tmplTodosModule = `package todos
