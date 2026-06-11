@@ -57,7 +57,8 @@ func (s *StreamCtx) Send(event, data string) error
 func (s *StreamCtx) Write(p []byte) (int, error)
 
 // Flush flushes buffered data to the client immediately.
-func (s *StreamCtx) Flush()
+// Returns an error if the underlying write fails (e.g. client disconnected).
+func (s *StreamCtx) Flush() error
 
 // Closed returns a channel closed when the client disconnects.
 func (s *StreamCtx) Closed() <-chan struct{}
@@ -180,7 +181,9 @@ func (c *NotificationsController) HandleSSE(ctx *bast.StreamCtx) {
             if err := ctx.Send(event.Type, event.Data); err != nil {
                 return
             }
-            ctx.Flush()
+            if err := ctx.Flush(); err != nil {
+                return
+            }
         case <-ctx.Done():
             return
         }
@@ -216,8 +219,12 @@ func (c *NotificationsController) HandleSSE(ctx *bast.StreamCtx) {
     for {
         select {
         case event := <-sub.Events():
-            ctx.Send(event.Type, event.Data)
-            ctx.Flush()
+            if err := ctx.Send(event.Type, event.Data); err != nil {
+                return
+            }
+            if err := ctx.Flush(); err != nil {
+                return
+            }
         case <-ctx.Done():
             return
         }
@@ -269,7 +276,9 @@ func (c *Controller) Stream(ctx *bast.StreamCtx) {
             if err := ctx.Send("message", msg); err != nil {
                 return
             }
-            ctx.Flush()
+            if err := ctx.Flush(); err != nil {
+                return
+            }
         case <-ctx.Done():
             return
         }

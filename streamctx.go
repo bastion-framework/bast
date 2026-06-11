@@ -10,7 +10,15 @@ import (
 )
 
 // StreamCtx is the context for streaming handlers.
-// Unlike *Ctx, it is NOT pooled — allocated per connection, GC'd when done.
+//
+// Unlike *Ctx it is intentionally NOT pooled. Stream connections are long-lived
+// (seconds to hours), so their lifetime is unbounded and cannot be managed by a
+// sync.Pool: the pool would either hold the slot indefinitely (defeating the pool)
+// or return the object while the connection is still active (use-after-free). One
+// allocation per connection is negligible compared to the cost of keeping the
+// connection open. GC handles reclamation naturally when Done fires and the handler
+// returns.
+//
 // It embeds context.Context directly — safe to pass anywhere, for any duration.
 type StreamCtx struct {
 	context.Context
@@ -60,11 +68,15 @@ func (s *StreamCtx) Write(p []byte) (int, error) {
 }
 
 // Flush flushes buffered data to the client immediately.
-func (s *StreamCtx) Flush() {
-	_ = s.bw.Flush()
+// Returns an error if the underlying write fails (e.g. client disconnected).
+func (s *StreamCtx) Flush() error {
+	if err := s.bw.Flush(); err != nil {
+		return fmt.Errorf("bast: stream flush: %w", err)
+	}
 	if s.flusher != nil {
 		s.flusher.Flush()
 	}
+	return nil
 }
 
 // Closed returns a channel that is closed when the client disconnects.

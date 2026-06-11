@@ -144,6 +144,21 @@ func TestLoadConfig_MissingRequiredReportsAll(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_UnexportedFields_DoNotPanic(t *testing.T) {
+	t.Setenv("BAST_TEST_UNEXP_SECRET", "must-not-panic")
+	type cfg struct {
+		Port   int    `env:"BAST_TEST_UNEXP_PORT" default:"4321"`
+		secret string `env:"BAST_TEST_UNEXP_SECRET"` // unexported — must be skipped, not panic
+	}
+	got, err := bast.LoadConfig[cfg]()
+	if err != nil {
+		t.Fatalf("unexpected error for struct with unexported field: %v", err)
+	}
+	if got.Port != 4321 {
+		t.Errorf("Port = %d, want 4321", got.Port)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {

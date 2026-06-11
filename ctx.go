@@ -92,6 +92,8 @@ func releaseCtx(c *Ctx) {
 }
 
 // wipe zeros every field. No partial resets, no map allocation.
+// Called only from releaseCtx via defer, so it runs even if a handler panics —
+// the net/http server catches the panic after the defer unwinds.
 func (c *Ctx) wipe() {
 	c.Request = nil
 	c.writer = nil

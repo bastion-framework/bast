@@ -67,6 +67,36 @@ func TestResponse_WithHeader_BuildsCorrectMap(t *testing.T) {
 	}
 }
 
+// --- Security tests ---
+
+func TestWithHeader_StripsCRLF_InValue(t *testing.T) {
+	r := bast.NewRawResponse(200, "", nil)
+	r = r.WithHeader("X-Custom", "val\r\nX-Injected: evil")
+	h := r.Headers()
+	want := "valX-Injected: evil"
+	if h["X-Custom"] != want {
+		t.Errorf("WithHeader value after CRLF strip = %q, want %q", h["X-Custom"], want)
+	}
+}
+
+func TestWithHeader_StripsCRLF_InKey(t *testing.T) {
+	r := bast.NewRawResponse(200, "", nil)
+	r = r.WithHeader("X-Key\r\n", "value")
+	h := r.Headers()
+	if h["X-Key"] != "value" {
+		t.Errorf("key after CRLF strip not found: headers = %v", h)
+	}
+}
+
+func TestWithHeader_CleanHeader_Unchanged(t *testing.T) {
+	r := bast.NewRawResponse(200, "", nil)
+	r = r.WithHeader("X-Request-Id", "req-123")
+	h := r.Headers()
+	if h["X-Request-Id"] != "req-123" {
+		t.Errorf("clean header changed unexpectedly: %v", h)
+	}
+}
+
 // --- Micro-benchmarks ---
 
 // BenchmarkResponse_NewRaw measures raw response construction.

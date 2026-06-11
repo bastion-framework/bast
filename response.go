@@ -1,6 +1,9 @@
 package bast
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // header is a key-value pair stored in the Response.
 // Using a slice of header instead of map[string]string eliminates the map bucket
@@ -58,7 +61,24 @@ func (r Response) Err() error { return r.err }
 
 // WithHeader returns a new Response with an additional header set.
 // Allocates a new backing slice of exactly len+1 — no capacity aliasing possible.
+// Strips \r and \n from both key and value to prevent CRLF injection.
 func (r Response) WithHeader(key, value string) Response {
+	if strings.ContainsAny(key, "\r\n") {
+		key = strings.Map(func(c rune) rune {
+			if c == '\r' || c == '\n' {
+				return -1
+			}
+			return c
+		}, key)
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		value = strings.Map(func(c rune) rune {
+			if c == '\r' || c == '\n' {
+				return -1
+			}
+			return c
+		}, value)
+	}
 	n := len(r.headers)
 	h := make([]header, n+1)
 	copy(h, r.headers)

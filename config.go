@@ -46,6 +46,13 @@ func fillStruct(rv reflect.Value, rt reflect.Type, prefix string, missing *[]str
 		field := rt.Field(i)
 		fv := rv.Field(i)
 
+		// Skip unexported or otherwise non-settable fields — calling Set/SetString on
+		// them panics. Unexported fields with env tags are a configuration bug but we
+		// degrade gracefully rather than crashing at startup.
+		if !fv.CanSet() {
+			continue
+		}
+
 		envKey := field.Tag.Get("env")
 		if envKey == "" {
 			continue
