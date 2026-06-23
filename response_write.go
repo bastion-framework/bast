@@ -42,7 +42,13 @@ func writeResponse(w http.ResponseWriter, resp Response) {
 		http.SetCookie(w, c)
 	}
 	if ct := resp.ContentType(); ct != "" {
-		w.Header().Set("Content-Type", ct)
+		hh := w.Header()
+		if v := hh["Content-Type"]; cap(v) > 0 {
+			hh["Content-Type"] = v[:1]
+			hh["Content-Type"][0] = ct
+		} else {
+			hh["Content-Type"] = []string{ct}
+		}
 	}
 	if resp.Status() != 0 {
 		w.WriteHeader(resp.Status())

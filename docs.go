@@ -1,11 +1,12 @@
 package bast
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
+
+	"github.com/bastion-framework/bast/internal/jsonx"
 )
 
 // DocsConfig configures the built-in OpenAPI documentation endpoints.
@@ -344,7 +345,7 @@ func (a *App) registerDocsRoutes() {
 	if d.JSONPath != "" {
 		a.router.Add("GET", d.JSONPath, HandlerFunc(func(ctx *Ctx) Response {
 			spec := a.OpenAPISpec()
-			b, _ := json.Marshal(spec)
+			b, _ := jsonx.Marshal(spec)
 			return newRawResponse(200, "application/json", b)
 		}))
 	}
