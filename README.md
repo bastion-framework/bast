@@ -117,52 +117,77 @@ func TestCreateUser(t *testing.T) {
 
 ## Benchmarks
 
-All `net/http` frameworks measured identically: `httptest.ResponseRecorder` + `ServeHTTP`, Intel i7-9700K @ 3.60 GHz, Go 1.25, windows/amd64.
+Intel i7-9700K @ 3.60 GHz, Go 1.25, windows/amd64. Three benchmark tiers — run them all with:
 
 ```
 cd bench && go test -bench=. -benchmem -benchtime=5s
 ```
 
-### GitHub API corpus — 26 routes, 8 representative requests cycled
+---
 
-| Framework | ns/op | B/op | allocs/op |
-|---|---:|---:|---:|
-| gin | 61 | 0 | 0 |
-| httprouter | 70 | 36 | 0 |
-| echo | 88 | 0 | 0 |
-| iris | 184 | 16 | 1 |
-| **bast** | **262** | **16** | **1** |
-| stdlib | 305 | 20 | 1 |
-| chi | 554 | 620 | 3 |
-| gorilla/mux | 1 700 | 1 080 | 7 |
+### Tier 1 — Router lookup only (no HTTP stack)
 
-### Static route — `GET /ping`
+Measures pure route-matching time by calling the router's lookup API directly.
+Bast's flat-arena BFS layout outperforms httprouter on non-trivial routes — and never allocates for path parameters.
+
+| Benchmark | bast | httprouter |
+|---|---:|---:|
+| Static `GET /ping` | **13 ns · 0 allocs** | 12 ns · 0 allocs |
+| Param `GET /users/:id` | **22 ns · 0 allocs** | 48 ns · 1 alloc |
+| GitHub corpus (26 routes, 8 requests) | **32 ns · 0 allocs** | 59 ns · 0 allocs |
+
+---
+
+### Tier 2 — Fair comparison (all frameworks, minimum-work handler)
+
+Every framework returns status 200 with no body and no extra headers — the same workload gin and echo use in their own published benchmarks.
+This isolates routing + dispatch from response-writing.
+
+#### GitHub API corpus
 
 | Framework | ns/op | allocs/op |
 |---|---:|---:|
-| httprouter | 21 | 0 |
+| gin | 60 | 0 |
+| httprouter | 67 | 0 |
+| echo | 84 | 0 |
+| **bast** | **139** | **0** |
+| chi | 526 | 3 |
+| gorilla/mux | 1 618 | 7 |
+
+#### Static route — `GET /ping`
+
+| Framework | ns/op | allocs/op |
+|---|---:|---:|
+| httprouter | 20 | 0 |
 | gin | 37 | 0 |
-| echo | 41 | 0 |
-| iris | 82 | 0 |
-| stdlib | 99 | 0 |
-| **bast** | **229** | **1** |
-| chi | 318 | 2 |
-| gorilla/mux | 735 | 7 |
+| echo | 38 | 0 |
+| **bast** | **110** | **0** |
+| chi | 284 | 2 |
+| gorilla/mux | 656 | 7 |
 
-### Param route — `GET /users/:id`
+---
 
-| Framework | ns/op | allocs/op |
-|---|---:|---:|
-| echo | 46 | 0 |
-| gin | 47 | 0 |
-| httprouter | 59 | 1 |
-| iris | 150 | 1 |
-| stdlib | 185 | 1 |
-| **bast** | **248** | **1** |
-| chi | 357 | 2 |
-| gorilla/mux | 936 | 8 |
+### Tier 3 — Full framework stack
 
-> **Note** — Bast measures the full framework stack: module registration, pooled `*Ctx` acquire/release, response marshalling, and `Content-Type` header write. Gin, echo, and httprouter benchmark routing + a minimal handler only. Fiber (fasthttp) is excluded — its `app.Test()` harness pipes a full HTTP/1.1 message in-process (~7 µs overhead absent in production).
+Bast uses a realistic handler (`ctx.OK(nil)`) that writes a proper JSON envelope with `Content-Type: application/json`. Other frameworks still use their minimum-work handler.
+
+| Benchmark | bast | gin | echo | httprouter | iris | stdlib | chi | gorilla/mux |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| GitHub corpus | **219 ns · 0 allocs** | 59 | 83 | 66 | 178 | 298 | 519 | 1 548 |
+| Static | **177 ns · 0 allocs** | 37 | 42 | 20 | 83 | 92 | 284 | 668 |
+| Param | **190 ns · 0 allocs** | 46 | 47 | 56 | 146 | 182 | 331 | 874 |
+
+> Fiber (fasthttp) is excluded — its `app.Test()` harness pipes a full HTTP/1.1 message in-process (~7 µs overhead absent in production).
+
+---
+
+**Further headroom** — not yet implemented, each shaves additional allocations or latency:
+
+- **Request body buffer pooling** — pool the `bytes.Buffer` in `readBody()` to eliminate 1 alloc on any body-reading endpoint
+- **Lazy `Ctx.store` init** — skip the `map[string]any` allocation for routes that never call `ctx.Set()`
+- **Route-level content-type hint** — embed the content type in the route descriptor so `writeResponse` can skip the header write entirely for static routes
+- **Per-shard `sync.Pool`** — NUMA-aware per-P pool sharding eliminates cross-core cache invalidation at high concurrency
+- **Arena allocation** — monotonic per-request arena wiped as a single `runtime.MemClr`, eliminating GC pressure for all per-request objects
 
 ---
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/bastion-framework/bast"
+	bRouter "github.com/bastion-framework/bast/internal/router"
 	fiberv2 "github.com/gofiber/fiber/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-chi/chi/v5"
@@ -327,6 +328,33 @@ func (c *corpusCtrl) Routes() []bast.Route {
 	return out
 }
 
+// rawCorpusCtrl uses ctx.Raw so the handler does the same minimum work as the
+// other frameworks in BenchmarkFair (status 200, no body, no extra headers).
+type rawCorpusCtrl struct{ routes []route }
+
+func (c *rawCorpusCtrl) Routes() []bast.Route {
+	noop := func(ctx *bast.Ctx) bast.Response { return ctx.Raw(200, "", nil) }
+	out := make([]bast.Route, len(c.routes))
+	for i, r := range c.routes {
+		out[i] = bast.Route{Method: r.method, Pattern: r.path, Handler: noop}
+	}
+	return out
+}
+
+func newBastRaw(routes []route) http.Handler {
+	app := bast.New(bast.Config{Logger: noopLog{}})
+	app.Register(bast.Module{Controller: &rawCorpusCtrl{routes}})
+	return app
+}
+
+func newBastRouter(routes []route) *bRouter.Router {
+	r := bRouter.New()
+	for _, rt := range routes {
+		r.Add(rt.method, rt.path, struct{}{})
+	}
+	return r
+}
+
 // ── noop logger for bast ──────────────────────────────────────────────────────
 
 type noopLog struct{}
@@ -344,3 +372,109 @@ func (noopLog) Info(_ string, _ ...any)                                        {
 func (noopLog) Warn(_ string, _ ...any)                                        {}
 func (noopLog) Error(_ string, _ ...any)                                       {}
 func (noopLog) Debug(_ string, _ ...any)                                       {}
+
+// ── Fair comparison: all frameworks with minimum-work handler ─────────────────
+// Every framework returns status 200 with no body and no extra headers.
+// Isolates routing + dispatch overhead from response-writing overhead.
+
+func BenchmarkFair_Static(b *testing.B) {
+	req := httptest.NewRequest("GET", "/ping", nil)
+	b.Run("bast", func(b *testing.B) { runHTTP(b, newBastRaw(static1), req) })
+	b.Run("httprouter", func(b *testing.B) { runHTTP(b, newHttprouter(static1), req) })
+	b.Run("gin", func(b *testing.B) { runHTTP(b, newGin(static1), req) })
+	b.Run("echo", func(b *testing.B) { runHTTP(b, newEcho(static1), req) })
+	b.Run("chi", func(b *testing.B) { runHTTP(b, newChi(static1), req) })
+	b.Run("gorilla", func(b *testing.B) { runHTTP(b, newGorilla(static1), req) })
+}
+
+func BenchmarkFair_Param(b *testing.B) {
+	req := httptest.NewRequest("GET", "/users/42", nil)
+	b.Run("bast", func(b *testing.B) { runHTTP(b, newBastRaw(param1), req) })
+	b.Run("httprouter", func(b *testing.B) { runHTTP(b, newHttprouter(param1), req) })
+	b.Run("gin", func(b *testing.B) { runHTTP(b, newGin(param1), req) })
+	b.Run("echo", func(b *testing.B) { runHTTP(b, newEcho(param1), req) })
+	b.Run("chi", func(b *testing.B) { runHTTP(b, newChi(param1), req) })
+	b.Run("gorilla", func(b *testing.B) { runHTTP(b, newGorilla(param1), req) })
+}
+
+func BenchmarkFair_GitHub(b *testing.B) {
+	b.Run("bast", func(b *testing.B) { runHTTPCorpus(b, newBastRaw(githubRoutes)) })
+	b.Run("httprouter", func(b *testing.B) { runHTTPCorpus(b, newHttprouter(githubRoutes)) })
+	b.Run("gin", func(b *testing.B) { runHTTPCorpus(b, newGin(githubRoutes)) })
+	b.Run("echo", func(b *testing.B) { runHTTPCorpus(b, newEcho(githubRoutes)) })
+	b.Run("chi", func(b *testing.B) { runHTTPCorpus(b, newChi(githubRoutes)) })
+	b.Run("gorilla", func(b *testing.B) { runHTTPCorpus(b, newGorilla(githubRoutes)) })
+}
+
+// ── Router lookup only (no HTTP stack) ───────────────────────────────────────
+// Benchmarks the routing lookup phase in complete isolation.
+// bast exposes router.Find directly; httprouter exposes Lookup.
+
+func BenchmarkRouterLookup(b *testing.B) {
+	b.Run("bast/static", func(b *testing.B) {
+		r := newBastRouter(static1)
+		var params [8]bRouter.Param
+		r.Find("GET", "/ping", params[:0]) // freeze
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Find("GET", "/ping", params[:0])
+		}
+	})
+
+	b.Run("bast/param", func(b *testing.B) {
+		r := newBastRouter(param1)
+		var params [8]bRouter.Param
+		r.Find("GET", "/users/42", params[:0]) // freeze
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Find("GET", "/users/42", params[:0])
+		}
+	})
+
+	b.Run("bast/github", func(b *testing.B) {
+		r := newBastRouter(githubRoutes)
+		var params [8]bRouter.Param
+		r.Find(githubReqs[0].method, githubReqs[0].path, params[:0]) // freeze
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req := githubReqs[i%len(githubReqs)]
+			r.Find(req.method, req.path, params[:0])
+		}
+	})
+
+	b.Run("httprouter/static", func(b *testing.B) {
+		r := httprouter.New()
+		r.GET("/ping", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {})
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Lookup("GET", "/ping")
+		}
+	})
+
+	b.Run("httprouter/param", func(b *testing.B) {
+		r := httprouter.New()
+		r.GET("/users/:id", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {})
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Lookup("GET", "/users/42")
+		}
+	})
+
+	b.Run("httprouter/github", func(b *testing.B) {
+		r := httprouter.New()
+		for _, rt := range githubRoutes {
+			r.Handle(rt.method, rt.path, func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {})
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req := githubReqs[i%len(githubReqs)]
+			r.Lookup(req.method, req.path)
+		}
+	})
+}
