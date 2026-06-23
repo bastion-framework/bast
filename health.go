@@ -2,8 +2,9 @@ package bast
 
 import (
 	"context"
-	"encoding/json"
 	"time"
+
+	"github.com/bastion-framework/bast/internal/jsonx"
 )
 
 // HealthConfig configures the built-in health check endpoints.
@@ -35,7 +36,7 @@ type checkResult struct {
 // Always returns 200 as long as the process is alive — never checks dependencies.
 func (a *App) LivenessHandler() HandlerFunc {
 	return func(ctx *Ctx) Response {
-		body, _ := json.Marshal(map[string]string{"status": "alive"})
+		body, _ := jsonx.Marshal(map[string]string{"status": "alive"})
 		return newRawResponse(200, "application/json", body)
 	}
 }
@@ -75,7 +76,7 @@ func (a *App) ReadinessHandler() HandlerFunc {
 			status = 503
 		}
 
-		body, _ := json.Marshal(map[string]any{
+		body, _ := jsonx.Marshal(map[string]any{
 			"status": overall,
 			"checks": results,
 		})

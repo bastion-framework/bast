@@ -3,7 +3,6 @@ package bast
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bastion-framework/bast/internal/jsonx"
 	"github.com/bastion-framework/bast/internal/router"
 )
 
@@ -40,32 +40,21 @@ type Ctx struct {
 	// detachedCtx is a copy of the request context, safe to pass anywhere.
 	detachedCtx context.Context
 
-	// Raw stdlib request.
 	Request *http.Request
+	writer  http.ResponseWriter
 
-	// writer is unexported — handlers never write directly.
-	writer http.ResponseWriter
-
-	// paramStorage is pre-allocated inside the struct — no heap allocation for params.
-	// params slices into paramStorage so router appends never escape to the heap.
+	// params slices into paramStorage; both live in the struct — zero heap alloc on the hot path.
 	paramStorage [8]router.Param
 	params       []router.Param
 
-	// Internal store for middleware-injected typed values.
-	store map[string]any
-
-	// Buffered request body — read once, reused on subsequent calls.
+	store       map[string]any
 	bodyBuf     []byte
 	maxBodySize int64
 
-	// trustedProxies is set by the app for IP resolution.
 	trustedProxies []*net.IPNet
-
-	// validator is used by Bind.
-	validator Validator
+	validator      Validator
 }
 
-// ctxPool manages *Ctx recycling.
 var ctxPool = sync.Pool{
 	New: func() any {
 		c := &Ctx{store: make(map[string]any, 8)}
@@ -74,7 +63,6 @@ var ctxPool = sync.Pool{
 	},
 }
 
-// acquireCtx gets a *Ctx from the pool and initializes it for the request.
 func acquireCtx(w http.ResponseWriter, r *http.Request, maxBody int64, proxies []*net.IPNet, v Validator) *Ctx {
 	c := ctxPool.Get().(*Ctx)
 	c.Request = r
@@ -289,13 +277,19 @@ func (c *Ctx) readBody() error {
 	if limit == 0 {
 		limit = defaultMaxBodySize
 	}
+	// Pre-size the buffer from Content-Length when available so io.ReadAll
+	// never has to re-grow from its default 512-byte start.
+	initCap := int64(512)
+	if cl := c.Request.ContentLength; cl > 0 && cl <= limit {
+		initCap = cl
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, initCap))
 	lr := io.LimitReader(c.Request.Body, limit)
-	buf, err := io.ReadAll(lr)
-	if err != nil {
+	if _, err := buf.ReadFrom(lr); err != nil {
 		return fmt.Errorf("bast: read body: %w", err)
 	}
-	c.bodyBuf = buf
-	c.Request.Body = io.NopCloser(bytes.NewReader(buf))
+	c.bodyBuf = buf.Bytes()
+	c.Request.Body = io.NopCloser(bytes.NewReader(c.bodyBuf))
 	return nil
 }
 
@@ -317,7 +311,7 @@ func (c *Ctx) BindJSON(v any) error {
 	if err := c.readBody(); err != nil {
 		return err
 	}
-	if err := json.Unmarshal(c.bodyBuf, v); err != nil {
+	if err := jsonx.Unmarshal(c.bodyBuf, v); err != nil {
 		return ErrInvalidBody(err.Error())
 	}
 	return nil
@@ -333,7 +327,7 @@ func (c *Ctx) Bind(v any) error {
 	if err := c.readBody(); err != nil {
 		return err
 	}
-	if err := json.Unmarshal(c.bodyBuf, v); err != nil {
+	if err := jsonx.Unmarshal(c.bodyBuf, v); err != nil {
 		return ErrInvalidBody(err.Error())
 	}
 	if c.validator != nil {
@@ -452,7 +446,7 @@ func (c *Ctx) jsonBody(data any) ([]byte, error) {
 	}
 	env := envPool.Get().(*jsonEnvelope)
 	env.Data = data
-	b, err := json.Marshal(env)
+	b, err := jsonx.Marshal(env)
 	env.Data = nil // clear before returning to pool to avoid extending data lifetime
 	envPool.Put(env)
 	if err != nil {
@@ -501,12 +495,22 @@ func (c *Ctx) Raw(status int, contentType string, body []byte) Response {
 	return newRawResponse(status, contentType, body)
 }
 
+// paginatedEnvelope is pooled to avoid a heap allocation per Paginated call.
+type paginatedEnvelope struct {
+	Data any            `json:"data"`
+	Meta PaginationMeta `json:"meta"`
+}
+
+var paginatedPool = sync.Pool{New: func() any { return new(paginatedEnvelope) }}
+
 // Paginated returns a 200 response with data and pagination metadata.
 func (c *Ctx) Paginated(data any, meta PaginationMeta) Response {
-	b, err := json.Marshal(struct {
-		Data any            `json:"data"`
-		Meta PaginationMeta `json:"meta"`
-	}{Data: data, Meta: meta})
+	env := paginatedPool.Get().(*paginatedEnvelope)
+	env.Data = data
+	env.Meta = meta
+	b, err := jsonx.Marshal(env)
+	env.Data = nil
+	paginatedPool.Put(env)
 	if err != nil {
 		return c.Error(err)
 	}

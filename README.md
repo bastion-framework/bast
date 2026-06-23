@@ -117,7 +117,52 @@ func TestCreateUser(t *testing.T) {
 
 ## Benchmarks
 
-See [BENCH.md](BENCH.md) for the full suite and regression thresholds.
+All `net/http` frameworks measured identically: `httptest.ResponseRecorder` + `ServeHTTP`, Intel i7-9700K @ 3.60 GHz, Go 1.25, windows/amd64.
+
+```
+cd bench && go test -bench=. -benchmem -benchtime=5s
+```
+
+### GitHub API corpus — 26 routes, 8 representative requests cycled
+
+| Framework | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| gin | 61 | 0 | 0 |
+| httprouter | 70 | 36 | 0 |
+| echo | 88 | 0 | 0 |
+| iris | 184 | 16 | 1 |
+| **bast** | **262** | **16** | **1** |
+| stdlib | 305 | 20 | 1 |
+| chi | 554 | 620 | 3 |
+| gorilla/mux | 1 700 | 1 080 | 7 |
+
+### Static route — `GET /ping`
+
+| Framework | ns/op | allocs/op |
+|---|---:|---:|
+| httprouter | 21 | 0 |
+| gin | 37 | 0 |
+| echo | 41 | 0 |
+| iris | 82 | 0 |
+| stdlib | 99 | 0 |
+| **bast** | **229** | **1** |
+| chi | 318 | 2 |
+| gorilla/mux | 735 | 7 |
+
+### Param route — `GET /users/:id`
+
+| Framework | ns/op | allocs/op |
+|---|---:|---:|
+| echo | 46 | 0 |
+| gin | 47 | 0 |
+| httprouter | 59 | 1 |
+| iris | 150 | 1 |
+| stdlib | 185 | 1 |
+| **bast** | **248** | **1** |
+| chi | 357 | 2 |
+| gorilla/mux | 936 | 8 |
+
+> **Note** — Bast measures the full framework stack: module registration, pooled `*Ctx` acquire/release, response marshalling, and `Content-Type` header write. Gin, echo, and httprouter benchmark routing + a minimal handler only. Fiber (fasthttp) is excluded — its `app.Test()` harness pipes a full HTTP/1.1 message in-process (~7 µs overhead absent in production).
 
 ---
 
