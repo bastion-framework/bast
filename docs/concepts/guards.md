@@ -1,19 +1,4 @@
----
-title: Guards
-parent: Concepts
-nav_order: 4
----
-
 # Guards
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 Guards run **before** the handler. Return `nil` to allow the request through; return an error to block it. Guards are cleaner than middleware for authentication and authorisation because the intent is explicit and named.
 

@@ -1,19 +1,4 @@
----
-title: Testing
-parent: Features
-nav_order: 1
----
-
 # Testing with `basttest`
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 `basttest` ships with the framework — no separate install or mock library needed. It provides two testing patterns: unit tests via `NewCtx` and integration tests via `NewApp`.
 

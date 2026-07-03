@@ -1,19 +1,4 @@
----
-title: Configuration
-parent: Features
-nav_order: 4
----
-
 # Configuration — `LoadConfig[T]`
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 `bast.LoadConfig[T]()` loads typed, validated configuration from environment variables at startup. Missing required variables are **all** reported in a single error so you fix them in one deploy cycle, not one at a time.
 
@@ -177,4 +162,4 @@ convention: `0` uses the safe default where one exists, a negative value disable
 | `MaxBodySize` | `4 MB` | Global body limit; override per route with `WithMaxBody` |
 | `TrustedProxies` | none | CIDRs allowed to set `X-Forwarded-For`; invalid entries panic |
 
-See the [Production Checklist]({{ site.baseurl }}/production) for how these fit together.
+See the [Production Checklist](../production.md) for how these fit together.

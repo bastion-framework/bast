@@ -1,19 +1,4 @@
----
-title: Health Checks
-parent: Features
-nav_order: 3
----
-
 # Health Checks
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 Every production service needs `/health` and `/ready`. In Bast, health checks are first-class — not a route hack.
 

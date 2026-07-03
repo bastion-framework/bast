@@ -1,8 +1,3 @@
----
-title: Introduction
-nav_order: 1
----
-
 # Bast
 
 **A structured Go framework for building efficient, scalable, and production server-side applications**
@@ -136,8 +131,8 @@ func (c *UsersController) GetUser(ctx *bast.Ctx) bast.Response {
 
 ## Next steps
 
-- [Getting Started](getting-started) — install, scaffold, run your first request
-- [Core Concepts](concepts/modules) — understand the module system
-- [CLI Reference](cli) — `bast new` and `bast generate`
-- [Testing](features/testing) — unit and integration testing with `basttest`
-- [Benchmarks](benchmarks) — performance numbers and methodology
+- [Getting Started](getting-started.md) — install, scaffold, run your first request
+- [Core Concepts](concepts/modules.md) — understand the module system
+- [CLI Reference](cli.md) — `bast new` and `bast generate`
+- [Testing](features/testing.md) — unit and integration testing with `basttest`
+- [Benchmarks](benchmarks.md) — performance numbers and methodology

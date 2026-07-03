@@ -1,19 +1,4 @@
----
-title: Streaming
-parent: Concepts
-nav_order: 7
----
-
 # Streaming — `*bast.StreamCtx`
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 For long-lived connections (SSE, chunked responses, file streaming), Bast provides `*StreamCtx` — a completely different type from `*Ctx` that is **never pooled**.
 

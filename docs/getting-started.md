@@ -1,18 +1,4 @@
----
-title: Getting Started
-nav_order: 2
----
-
 # Getting Started
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 ## Requirements
 
@@ -224,4 +210,4 @@ if err != nil {
 }
 ```
 
-Missing required variables are all reported in a single error so you fix them in one deploy cycle, not one at a time. See [Configuration](features/config) for the full reference.
+Missing required variables are all reported in a single error so you fix them in one deploy cycle, not one at a time. See [Configuration](features/config.md) for the full reference.

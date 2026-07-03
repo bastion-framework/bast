@@ -1,21 +1,6 @@
----
-title: Production Checklist
-nav_order: 7
----
-
 # Production Checklist
-{: .no_toc }
 
 Everything to review before a Bast service takes real traffic.
-{: .fs-6 .fw-300 }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 ## Server timeouts
 
@@ -127,7 +112,7 @@ readinessProbe:
 ```
 
 Wire dependency checks into readiness so the pod is pulled from rotation when a
-dependency degrades — see [Health Checks]({{ site.baseurl }}/features/health).
+dependency degrades — see [Health Checks](features/health.md).
 
 ## Startup validation
 

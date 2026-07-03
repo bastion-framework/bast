@@ -1,19 +1,4 @@
----
-title: Modules
-parent: Concepts
-nav_order: 1
----
-
 # Modules
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 A module is the fundamental unit of organisation in a Bast application. It is **portable** and **self-contained** — it owns its repository, service, and controller entirely. Nothing leaks out except what it deliberately exposes.
 

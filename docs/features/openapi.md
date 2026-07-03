@@ -1,19 +1,4 @@
----
-title: OpenAPI / Swagger
-parent: Features
-nav_order: 2
----
-
 # OpenAPI / Swagger
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 Bast generates an OpenAPI 3.0.3 spec directly from your code — no comment annotations, no external codegen tools. The spec is built once at startup from route metadata and served statically. Zero reflection at request time.
 

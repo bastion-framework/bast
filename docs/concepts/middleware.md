@@ -1,19 +1,4 @@
----
-title: Middleware
-parent: Concepts
-nav_order: 5
----
-
 # Middleware
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 Middleware in Bast is a function that wraps a `HandlerFunc` to form a pipeline. Call `next(ctx)` to pass control downstream; return a `Response` directly to short-circuit.
 
@@ -150,7 +135,6 @@ Logs each request using `log/slog` with method, path, status, duration, and IP.
 app.Use(middleware.Logger)
 ```
 
-{: .note }
 The framework's built-in `[Bast]` logger already logs every request via `Logger.OnRequest`. Add `middleware.Logger` only if you need a separate slog-based log stream.
 
 ### `middleware.CORS`

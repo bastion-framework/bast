@@ -1,19 +1,4 @@
----
-title: Error Handling
-parent: Concepts
-nav_order: 6
----
-
 # Error Handling
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 Bast uses a centralized **error boundary** pattern. Handlers return errors via `ctx.Error(err)`. The boundary intercepts every error and maps it to a consistent JSON response. One place — consistent responses across the entire app.
 

@@ -1,19 +1,4 @@
----
-title: Controllers
-parent: Concepts
-nav_order: 3
----
-
 # Controllers
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 A controller declares a module's route mappings. It is the only piece of a module that the framework touches directly — through the `Controller` interface.
 

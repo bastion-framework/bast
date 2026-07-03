@@ -1,0 +1,78 @@
+site_name: Bast
+site_description: A structured Go framework for building efficient, scalable, and production server-side applications.
+site_url: https://bastion-framework.github.io/bast/
+repo_url: https://github.com/bastion-framework/bast
+repo_name: bastion-framework/bast
+copyright: 'Author <a href="https://github.com/kasimlyee">Kasim Lyee</a> &middot; SUDs Tech &middot; MIT License'
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Introduction: index.md
+  - Getting Started: getting-started.md
+  - Concepts:
+      - concepts/index.md
+      - Modules: concepts/modules.md
+      - Context (Ctx): concepts/ctx.md
+      - Controllers: concepts/controllers.md
+      - Guards: concepts/guards.md
+      - Middleware: concepts/middleware.md
+      - Error Handling: concepts/errors.md
+      - Streaming: concepts/streaming.md
+  - Features:
+      - features/index.md
+      - Testing: features/testing.md
+      - OpenAPI / Swagger: features/openapi.md
+      - Health Checks: features/health.md
+      - Configuration: features/config.md
+  - CLI: cli.md
+  - Benchmarks: benchmarks.md
+  - Production Checklist: production.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/bastion-framework/bast
+    - icon: fontawesome/brands/golang
+      link: https://pkg.go.dev/github.com/bastion-framework/bast

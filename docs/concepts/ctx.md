@@ -1,19 +1,4 @@
----
-title: Context (Ctx)
-parent: Concepts
-nav_order: 2
----
-
 # Context — `*bast.Ctx`
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 `*bast.Ctx` is the heart of Bast. Every handler receives one. It provides typed access to the request, route params, headers, body, and response utilities.
 
