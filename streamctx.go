@@ -27,7 +27,10 @@ type StreamCtx struct {
 	flusher http.Flusher
 	bw      *bufio.Writer
 	params  []router.Param
-	store   map[string]any
+	store   map[string]any // lazily allocated on first Set
+
+	status     int  // status reported to the request logger
+	headerSent bool // true once the status line is (implicitly) on the wire
 }
 
 // newStreamCtx creates a StreamCtx for a streaming connection.
@@ -36,7 +39,7 @@ func newStreamCtx(ctx context.Context, w http.ResponseWriter, r *http.Request) *
 		Context: ctx,
 		Request: r,
 		writer:  w,
-		store:   make(map[string]any, 8),
+		status:  http.StatusOK,
 	}
 	if f, ok := w.(http.Flusher); ok {
 		sc.flusher = f
@@ -48,6 +51,17 @@ func newStreamCtx(ctx context.Context, w http.ResponseWriter, r *http.Request) *
 // SetHeader sets a response header. Must be called before first Write or Send.
 func (s *StreamCtx) SetHeader(key, value string) {
 	s.writer.Header().Set(key, value)
+}
+
+// Status sends the status line immediately. Call before any Write, Send, or
+// Flush; once data is on the wire the status is fixed at 200 and Status is a no-op.
+func (s *StreamCtx) Status(code int) {
+	if s.headerSent {
+		return
+	}
+	s.status = code
+	s.headerSent = true
+	s.writer.WriteHeader(code)
 }
 
 // Send writes a Server-Sent Event to the client.
@@ -73,6 +87,7 @@ func (s *StreamCtx) Flush() error {
 	if err := s.bw.Flush(); err != nil {
 		return fmt.Errorf("bast: stream flush: %w", err)
 	}
+	s.headerSent = true // first flush implicitly sends the 200 status line
 	if s.flusher != nil {
 		s.flusher.Flush()
 	}
@@ -105,6 +120,9 @@ func (s *StreamCtx) Get(key string) (any, bool) {
 
 // Set stores a value in the request-scoped store.
 func (s *StreamCtx) Set(key string, val any) {
+	if s.store == nil {
+		s.store = make(map[string]any, 8)
+	}
 	s.store[key] = val
 }
 
@@ -125,7 +143,7 @@ func (s *StreamCtx) MustGet(key string) any {
 func NewTestStreamCtx() *StreamCtx {
 	return &StreamCtx{
 		Context: context.Background(),
-		store:   make(map[string]any, 8),
+		status:  http.StatusOK,
 	}
 }
 
@@ -136,5 +154,5 @@ func SetStreamTestParam(s *StreamCtx, key, value string) {
 
 // SetStreamTestStore sets a value in the store of a test StreamCtx. For basttest only.
 func SetStreamTestStore(s *StreamCtx, key string, val any) {
-	s.store[key] = val
+	s.Set(key, val)
 }

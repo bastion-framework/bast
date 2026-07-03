@@ -47,8 +47,9 @@ type Ctx struct {
 	paramStorage [8]router.Param
 	params       []router.Param
 
-	store       map[string]any
+	store       map[string]any // lazily allocated on first Set; reused across pool cycles
 	bodyBuf     []byte
+	bodyOwned   *bytes.Buffer // pooled buffer backing bodyBuf, returned on wipe
 	maxBodySize int64
 
 	trustedProxies []*net.IPNet
@@ -57,11 +58,17 @@ type Ctx struct {
 
 var ctxPool = sync.Pool{
 	New: func() any {
-		c := &Ctx{store: make(map[string]any, 8)}
+		c := &Ctx{}
 		c.params = c.paramStorage[:0]
 		return c
 	},
 }
+
+// bodyBufPool recycles request-body read buffers. Buffers above the cap are
+// dropped so one giant upload doesn't pin memory for the process lifetime.
+var bodyBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+const maxPooledBodyCap = 64 << 10
 
 func acquireCtx(w http.ResponseWriter, r *http.Request, maxBody int64, proxies []*net.IPNet, v Validator) *Ctx {
 	c := ctxPool.Get().(*Ctx)
@@ -87,6 +94,12 @@ func (c *Ctx) wipe() {
 	c.writer = nil
 	c.detachedCtx = nil
 	c.bodyBuf = nil
+	if c.bodyOwned != nil {
+		if c.bodyOwned.Cap() <= maxPooledBodyCap {
+			bodyBufPool.Put(c.bodyOwned)
+		}
+		c.bodyOwned = nil
+	}
 	c.maxBodySize = 0
 	c.trustedProxies = nil
 	c.validator = nil
@@ -100,7 +113,6 @@ func (c *Ctx) wipe() {
 // Never call releaseCtx on a test ctx — it is not pooled.
 func newTestCtx() *Ctx {
 	c := &Ctx{
-		store:       make(map[string]any, 8),
 		maxBodySize: defaultMaxBodySize,
 	}
 	c.params = c.paramStorage[:0]
@@ -277,23 +289,29 @@ func (c *Ctx) readBody() error {
 	if limit == 0 {
 		limit = defaultMaxBodySize
 	}
-	// Pre-size the buffer from Content-Length when available so io.ReadAll
-	// never has to re-grow from its default 512-byte start.
-	initCap := int64(512)
+	buf := bodyBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	// Pre-size from Content-Length when available so ReadFrom never re-grows.
 	if cl := c.Request.ContentLength; cl > 0 && cl <= limit {
-		initCap = cl
+		buf.Grow(int(cl))
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, initCap))
 	lr := io.LimitReader(c.Request.Body, limit)
 	if _, err := buf.ReadFrom(lr); err != nil {
+		bodyBufPool.Put(buf)
 		return fmt.Errorf("bast: read body: %w", err)
 	}
+	c.bodyOwned = buf
 	c.bodyBuf = buf.Bytes()
+	if c.bodyBuf == nil {
+		c.bodyBuf = []byte{} // empty body still marks readBody as done
+	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(c.bodyBuf))
 	return nil
 }
 
 // RawBody reads and returns the request body bytes. Safe to call multiple times.
+// The slice is backed by a pooled buffer: valid until the handler returns,
+// copy it if you need to retain it longer.
 func (c *Ctx) RawBody() ([]byte, error) {
 	if err := c.readBody(); err != nil {
 		return nil, err
@@ -397,6 +415,9 @@ func (c *Ctx) Cookies() []*http.Cookie {
 
 // Set stores a value in the request-scoped store.
 func (c *Ctx) Set(key string, val any) {
+	if c.store == nil {
+		c.store = make(map[string]any, 8)
+	}
 	c.store[key] = val
 }
 

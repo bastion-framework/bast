@@ -154,9 +154,9 @@ func BenchmarkResponse_Raw(b *testing.B) {
 // BenchmarkApp_WriteResponse exercises the full ServeHTTP path with ctx.OK(nil).
 // This is the production hot path benchmark.
 func BenchmarkApp_WriteResponse_OKNil(b *testing.B) {
-	app := bast.New(bast.Config{})
+	app := bast.New(bast.Config{Logger: silentLogger{}})
 	app.Register(bast.Module{
-		Prefix: "/bench",
+		Prefix:     "/bench",
 		Controller: &benchOKNilController{},
 	})
 	w := httptest.NewRecorder()

@@ -82,6 +82,8 @@ func (n *mutableNode) insert(segs []string, si int, handler any) {
 //   static:   nodes[childBase : childBase+staticCount]
 //   param:    nodes[childBase+staticCount]          (if hasParam==1)
 //   wildcard: nodes[childBase+staticCount+hasParam] (if hasWild==1)
+//
+
 type flatNode struct {
 	segment     string
 	param       string

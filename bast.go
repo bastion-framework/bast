@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,21 +15,42 @@ import (
 )
 
 // Config holds app-level settings.
+//
+// Timeout semantics: 0 means "use the safe default" where one exists,
+// a negative value disables the timeout entirely.
 type Config struct {
-	Port            int
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	MaxBodySize     int64
-	HandlerTimeout  time.Duration
+	Port int
+
+	// ReadTimeout / WriteTimeout have no default: a default WriteTimeout would
+	// kill long-lived SSE streams and a default ReadTimeout would kill slow
+	// uploads. Set them if your app serves neither. Use HandlerTimeout for
+	// per-request protection instead.
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+
+	// IdleTimeout defaults to 120s; ReadHeaderTimeout defaults to 10s
+	// (slowloris protection). Set to -1 to disable.
+	IdleTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+
+	MaxBodySize int64
+
+	// HandlerTimeout is the global per-request deadline applied to every
+	// non-stream route without an explicit route-level Timeout. Handlers see it
+	// via ctx.Context() cancellation. 0 means no global deadline.
+	HandlerTimeout time.Duration
+
+	// ShutdownTimeout bounds Shutdown when the caller's context has no
+	// deadline of its own. Defaults to 30s.
 	ShutdownTimeout time.Duration
-	HookTimeout     time.Duration
-	TrustedProxies  []string
-	ErrorHandler    ErrorHandler
-	Validator       Validator
-	Health          *HealthConfig
-	Docs            *DocsConfig
-	Logger          Logger
+
+	HookTimeout    time.Duration
+	TrustedProxies []string
+	ErrorHandler   ErrorHandler
+	Validator      Validator
+	Health         *HealthConfig
+	Docs           *DocsConfig
+	Logger         Logger
 }
 
 // App is the Bast application. Satisfies http.Handler.
@@ -167,8 +190,12 @@ func (a *App) registerRoute(r Route, prefix string, modMW []MiddlewareFunc, modG
 
 	// Per-route timeout — wraps the context with a deadline so services
 	// that respect ctx.Context() are cancelled when time is up.
-	if r.Timeout > 0 {
-		timeout := r.Timeout
+	// Falls back to the global HandlerTimeout when the route sets none.
+	timeout := r.Timeout
+	if timeout == 0 {
+		timeout = a.cfg.HandlerTimeout
+	}
+	if timeout > 0 {
 		inner := pipeline
 		pipeline = func(ctx *Ctx) Response {
 			tctx, cancel := context.WithTimeout(ctx.Context(), timeout)
@@ -226,30 +253,9 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var status int
 	switch h := match.Handler.(type) {
 	case streamPipeline:
-		blocked := false
-		for _, g := range h.guards {
-			if err := g.Check(ctx); err != nil {
-				resp := a.errHandler(ctx, err)
-				writeResponse(w, resp)
-				status = resp.Status()
-				blocked = true
-				break
-			}
-		}
-		if !blocked {
-			sctx := newStreamCtx(r.Context(), w, r)
-			if len(ctx.params) > 0 {
-				sctx.params = make([]router.Param, len(ctx.params))
-				copy(sctx.params, ctx.params)
-			}
-			for k, v := range ctx.store {
-				sctx.store[k] = v
-			}
-			h.handler(sctx)
-			status = http.StatusOK
-		}
+		status = a.serveStream(w, r, ctx, h)
 	case HandlerFunc:
-		resp := h(ctx)
+		resp := a.invoke(h, ctx)
 		if resp.IsError() {
 			a.logger.OnError(ctx, resp.Err())
 			resp = a.errHandler(ctx, resp.Err())
@@ -262,6 +268,68 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.OnRequest(r.Method, r.URL.Path, status, time.Since(start), ctx.IP())
+}
+
+// invoke runs a handler with built-in panic recovery. A panicking handler
+// yields a standard 500 instead of a dead connection. http.ErrAbortHandler
+// propagates untouched — it is net/http's sanctioned way to abort a response.
+func (a *App) invoke(h HandlerFunc, ctx *Ctx) (resp Response) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+				panic(rec)
+			}
+			a.logger.Error("panic recovered: %v method=%s path=%s\n%s",
+				rec, ctx.Method(), ctx.Path(), debug.Stack())
+			resp = a.errHandler(ctx, &BastError{
+				Status: http.StatusInternalServerError,
+				Code:   CodeInternal, Message: "internal server error",
+			})
+		}
+	}()
+	return h(ctx)
+}
+
+// serveStream runs guards then hands the connection to the stream handler.
+// Panics are recovered: if nothing was written yet the client gets a 500,
+// otherwise the connection just closes (headers are already on the wire).
+func (a *App) serveStream(w http.ResponseWriter, r *http.Request, ctx *Ctx, sp streamPipeline) (status int) {
+	for _, g := range sp.guards {
+		if err := g.Check(ctx); err != nil {
+			resp := a.errHandler(ctx, err)
+			writeResponse(w, resp)
+			return resp.Status()
+		}
+	}
+
+	sctx := newStreamCtx(r.Context(), w, r)
+	if len(ctx.params) > 0 {
+		sctx.params = make([]router.Param, len(ctx.params))
+		copy(sctx.params, ctx.params)
+	}
+	if len(ctx.store) > 0 {
+		sctx.store = make(map[string]any, len(ctx.store))
+		for k, v := range ctx.store {
+			sctx.store[k] = v
+		}
+	}
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+				panic(rec)
+			}
+			a.logger.Error("panic recovered in stream: %v method=%s path=%s\n%s",
+				rec, r.Method, r.URL.Path, debug.Stack())
+			if !sctx.headerSent {
+				w.WriteHeader(http.StatusInternalServerError)
+				sctx.status = http.StatusInternalServerError
+			}
+			status = sctx.status
+		}
+	}()
+	sp.handler(sctx)
+	return sctx.status
 }
 
 // Listen starts the HTTP server on the configured port.
@@ -284,13 +352,7 @@ func (a *App) Listen() error {
 	a.logger.OnListening(port)
 	a.runReadyHooks()
 
-	a.srv = &http.Server{
-		Handler:        a,
-		ReadTimeout:    a.cfg.ReadTimeout,
-		WriteTimeout:   a.cfg.WriteTimeout,
-		IdleTimeout:    a.cfg.IdleTimeout,
-		MaxHeaderBytes: 1 << 20,
-	}
+	a.srv = a.buildServer()
 
 	if err := a.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("bast: serve: %w", err)
@@ -298,17 +360,53 @@ func (a *App) Listen() error {
 	return nil
 }
 
+// buildServer constructs the http.Server with safe defaults applied.
+func (a *App) buildServer() *http.Server {
+	return &http.Server{
+		Handler:           a,
+		ReadTimeout:       timeoutOrDefault(a.cfg.ReadTimeout, 0),
+		WriteTimeout:      timeoutOrDefault(a.cfg.WriteTimeout, 0),
+		IdleTimeout:       timeoutOrDefault(a.cfg.IdleTimeout, 120*time.Second),
+		ReadHeaderTimeout: timeoutOrDefault(a.cfg.ReadHeaderTimeout, 10*time.Second),
+		MaxHeaderBytes:    1 << 20,
+	}
+}
+
+// timeoutOrDefault resolves the Config timeout convention:
+// 0 → default, negative → disabled (0 in http.Server terms).
+func timeoutOrDefault(v, def time.Duration) time.Duration {
+	switch {
+	case v < 0:
+		return 0
+	case v == 0:
+		return def
+	default:
+		return v
+	}
+}
+
 // Shutdown gracefully shuts down the server.
+// If ctx carries no deadline, Config.ShutdownTimeout is applied.
 func (a *App) Shutdown(ctx context.Context) error {
 	a.logger.OnShutdown()
 	if a.srv == nil {
 		return nil
 	}
-	if err := a.srv.Shutdown(ctx); err != nil {
+	sctx, cancel := shutdownContext(ctx, a.cfg.ShutdownTimeout)
+	defer cancel()
+	if err := a.srv.Shutdown(sctx); err != nil {
 		return fmt.Errorf("bast: server shutdown: %w", err)
 	}
-	a.runShutdownHooks(ctx)
+	a.runShutdownHooks(sctx)
 	return nil
+}
+
+// shutdownContext adds a deadline to ctx unless the caller already set one.
+func shutdownContext(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok || d <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 func (a *App) runInitHooks() error {
@@ -347,14 +445,17 @@ func (a *App) runShutdownHooks(ctx context.Context) {
 	}
 }
 
-// parseCIDRs parses a list of CIDR strings, silently ignoring invalid entries.
+// parseCIDRs parses the TrustedProxies list. An invalid entry panics:
+// silently dropping one would change which proxy headers are trusted,
+// and a security control must fail loudly at startup, not degrade quietly.
 func parseCIDRs(cidrs []string) []*net.IPNet {
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, cidr := range cidrs {
 		_, network, err := net.ParseCIDR(cidr)
-		if err == nil {
-			out = append(out, network)
+		if err != nil {
+			panic("bast: invalid TrustedProxies CIDR " + strconv.Quote(cidr) + ": " + err.Error())
 		}
+		out = append(out, network)
 	}
 	return out
 }

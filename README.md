@@ -179,27 +179,9 @@ Bast uses a realistic handler (`ctx.OK(nil)`) that writes a proper JSON envelope
 
 > Fiber (fasthttp) is excluded — its `app.Test()` harness pipes a full HTTP/1.1 message in-process (~7 µs overhead absent in production).
 
----
-
-**Further headroom** — not yet implemented, each shaves additional allocations or latency:
-
-- **Request body buffer pooling** — pool the `bytes.Buffer` in `readBody()` to eliminate 1 alloc on any body-reading endpoint
-- **Lazy `Ctx.store` init** — skip the `map[string]any` allocation for routes that never call `ctx.Set()`
-- **Route-level content-type hint** — embed the content type in the route descriptor so `writeResponse` can skip the header write entirely for static routes
-- **Per-shard `sync.Pool`** — NUMA-aware per-P pool sharding eliminates cross-core cache invalidation at high concurrency
-- **Arena allocation** — monotonic per-request arena wiped as a single `runtime.MemClr`, eliminating GC pressure for all per-request objects
 
 ---
 
-## Companion packages
-
-| Package | Description |
-|---|---|
-| `github.com/bastion-framework/bast-pgx` | pgx/pgxpool repo helpers, transaction utilities |
-| `github.com/bastion-framework/bast-gorm` | Community maintained |
-| `github.com/bastion-framework/bast-sqlc` | Community maintained |
-
----
 
 ## Contributing
 

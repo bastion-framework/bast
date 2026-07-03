@@ -4,13 +4,32 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/bastion-framework/bast"
 )
 
+// silentLogger discards everything — benchmarks must measure the framework,
+// not console output.
+type silentLogger struct{}
+
+func (silentLogger) OnBoot(string)                                        {}
+func (silentLogger) OnModuleRegistered(_, _ string)                       {}
+func (silentLogger) OnRouteRegistered(_, _ string, _ []string)            {}
+func (silentLogger) OnServiceExported(_, _ string)                        {}
+func (silentLogger) OnServiceResolved(_, _ string)                        {}
+func (silentLogger) OnListening(int)                                      {}
+func (silentLogger) OnShutdown()                                          {}
+func (silentLogger) OnRequest(_, _ string, _ int, _ time.Duration, _ string) {}
+func (silentLogger) OnError(_ *bast.Ctx, _ error)                         {}
+func (silentLogger) Info(string, ...any)                                  {}
+func (silentLogger) Warn(string, ...any)                                  {}
+func (silentLogger) Error(string, ...any)                                 {}
+func (silentLogger) Debug(string, ...any)                                 {}
+
 // benchApp builds a minimal app for request lifecycle benchmarks.
 func benchApp() *bast.App {
-	app := bast.New(bast.Config{})
+	app := bast.New(bast.Config{Logger: silentLogger{}})
 
 	staticCtrl := &benchStaticController{}
 	paramCtrl := &benchParamController{}
@@ -71,7 +90,7 @@ func BenchmarkApp_MiddlewareChain(b *testing.B) {
 	noop := func(next bast.HandlerFunc) bast.HandlerFunc {
 		return func(ctx *bast.Ctx) bast.Response { return next(ctx) }
 	}
-	app := bast.New(bast.Config{})
+	app := bast.New(bast.Config{Logger: silentLogger{}})
 	app.Use(noop, noop, noop, noop, noop)
 	app.Register(bast.Module{
 		Prefix:     "/mw",
@@ -89,9 +108,9 @@ func BenchmarkApp_MiddlewareChain(b *testing.B) {
 }
 
 func BenchmarkApp_ErrorBoundary(b *testing.B) {
-	app := bast.New(bast.Config{})
+	app := bast.New(bast.Config{Logger: silentLogger{}})
 	app.Register(bast.Module{
-		Prefix: "/err",
+		Prefix:     "/err",
 		Controller: &benchErrorController{},
 	})
 
