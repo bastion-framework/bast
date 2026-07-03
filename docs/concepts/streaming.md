@@ -50,6 +50,11 @@ type StreamCtx struct {
 // SetHeader sets a response header. Must be called before first Write or Send.
 func (s *StreamCtx) SetHeader(key, value string)
 
+// Status sends the status line immediately. Call before any Write, Send, or
+// Flush — once data is on the wire the status is fixed at 200 and this is a no-op.
+// The status you send here is what the request logger records.
+func (s *StreamCtx) Status(code int)
+
 // Send writes a Server-Sent Event to the client.
 func (s *StreamCtx) Send(event, data string) error
 
@@ -324,6 +329,15 @@ The design makes misuse impossible at compile time:
 ```
 
 If you try to use a `StreamHandlerFunc` where a `HandlerFunc` is expected (or vice versa), the compiler rejects it immediately.
+
+---
+
+## Panic safety
+
+Panic recovery is built into the framework. If a stream handler panics before
+anything was written, the client receives a 500; if data was already on the wire,
+the connection closes cleanly. Either way the panic is logged with a stack trace
+and the server keeps running. `http.ErrAbortHandler` propagates untouched.
 
 ---
 

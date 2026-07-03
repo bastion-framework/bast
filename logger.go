@@ -4,12 +4,36 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 )
 
-const bastVersion = "0.1.0"
+// bastVersion is resolved at init from the build info of the binary that
+// imports bast, so the boot banner always shows the actually-installed
+// version instead of a hardcoded literal.
+var bastVersion = detectVersion()
+
+const modulePath = "github.com/bastion-framework/bast"
+
+func detectVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	// Normal case: a user application depends on bast.
+	for _, dep := range info.Deps {
+		if dep.Path == modulePath {
+			return strings.TrimPrefix(dep.Version, "v")
+		}
+	}
+	// Building the framework module itself (tests, examples, cmd/bast).
+	if info.Main.Path == modulePath && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "dev"
+}
 
 // Logger is the pluggable logging interface for the Bast framework.
 // The default implementation produces colored output to stdout.

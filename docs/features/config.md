@@ -52,6 +52,9 @@ fmt.Println(cfg.DatabaseURL) // postgres://...
 | `required:"true"` | App refuses to start if absent and no default |
 | `secret:"true"` | Value is masked in boot logs |
 
+Unexported fields are skipped — an `env` tag on an unexported field is a
+configuration bug, but Bast degrades gracefully instead of panicking at startup.
+
 ---
 
 ## Supported field types
@@ -147,12 +150,31 @@ func main() {
     }
 
     app := bast.New(bast.Config{
-        Port:         cfg.Port,
-        ReadTimeout:  10 * time.Second,
-        WriteTimeout: 30 * time.Second,
+        Port:           cfg.Port,
+        HandlerTimeout: 10 * time.Second,
     })
 
     // use cfg.Database.URL to connect, cfg.Auth.JWTSecret for JWT, etc.
     app.Listen()
 }
 ```
+
+---
+
+## Server settings — `bast.Config`
+
+`bast.Config` (passed to `bast.New`) controls the HTTP server itself. Timeout
+convention: `0` uses the safe default where one exists, a negative value disables.
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `ReadHeaderTimeout` | `10s` | Slowloris protection |
+| `IdleTimeout` | `120s` | Keep-alive reaping |
+| `ReadTimeout` / `WriteTimeout` | unset | No default — would break streams and uploads |
+| `HandlerTimeout` | off | Global per-request deadline via `ctx.Context()` |
+| `ShutdownTimeout` | `30s` | Applied when `Shutdown`'s context has no deadline |
+| `HookTimeout` | `10s` | Bounds each `OnInit` / `OnShutdown` hook |
+| `MaxBodySize` | `4 MB` | Global body limit; override per route with `WithMaxBody` |
+| `TrustedProxies` | none | CIDRs allowed to set `X-Forwarded-For`; invalid entries panic |
+
+See the [Production Checklist]({{ site.baseurl }}/production) for how these fit together.

@@ -22,7 +22,13 @@ func runNew(appName, dir string) error {
 		}
 	}
 
-	data := map[string]string{"App": appName, "Version": resolveVersion()}
+	// A dev build has no release version to pin; the template then omits the
+	// require line and `go mod tidy` resolves the latest release instead.
+	ver := resolveVersion()
+	if ver == "dev" {
+		ver = ""
+	}
+	data := map[string]string{"App": appName, "Version": ver}
 
 	files := []struct {
 		path string
@@ -129,9 +135,9 @@ func main() {
 var tmplGoMod = `module {{.App}}
 
 go 1.22
-
+{{if .Version}}
 require github.com/bastion-framework/bast {{.Version}}
-`
+{{end}}`
 
 var tmplTodosModule = `package todos
 

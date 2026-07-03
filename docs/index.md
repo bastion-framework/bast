@@ -121,7 +121,7 @@ func (c *UsersController) GetUser(ctx *bast.Ctx) bast.Response {
 
 ```
 [Bast] ─────────────────────────────────────────────
-[Bast] Bastion Framework v0.1.0
+[Bast] Bastion Framework v0.3.0
 [Bast] ─────────────────────────────────────────────
 [Bast] Module     Users               /users
 [Bast]   GET      /users/             [AuthGuard]

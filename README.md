@@ -13,7 +13,7 @@
   <a href="https://github.com/bastion-framework/bast/actions"><img src="https://github.com/bastion-framework/bast/workflows/CI/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/go-%3E%3D1.22-blue" alt="Go version" />
   <img src="https://img.shields.io/github/license/bastion-framework/bast" alt="License" />
-  <img src="https://img.shields.io/badge/version-v0.1.0-green" alt="Version" />
+  <a href="https://github.com/bastion-framework/bast/tags"><img src="https://img.shields.io/github/v/tag/bastion-framework/bast?label=version&color=green" alt="Version" /></a>
 </p>
 
 ---
