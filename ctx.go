@@ -3,13 +3,17 @@ package bast
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
 	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bastion-framework/bast/internal/jsonx"
 	"github.com/bastion-framework/bast/internal/router"
@@ -51,6 +55,7 @@ type Ctx struct {
 	bodyBuf     []byte
 	bodyOwned   *bytes.Buffer // pooled buffer backing bodyBuf, returned on wipe
 	maxBodySize int64
+	bodyLimited bool // true once Request.Body has been wrapped by limitBody
 
 	trustedProxies []*net.IPNet
 	validator      Validator
@@ -101,6 +106,7 @@ func (c *Ctx) wipe() {
 		c.bodyOwned = nil
 	}
 	c.maxBodySize = 0
+	c.bodyLimited = false
 	c.trustedProxies = nil
 	c.validator = nil
 	c.params = c.paramStorage[:0] // reset length, keep backing array
@@ -281,23 +287,55 @@ func (c *Ctx) Path() string {
 
 // --- Body parsing ---
 
-func (c *Ctx) readBody() error {
-	if c.bodyBuf != nil {
-		return nil
+// limitBody wraps Request.Body in http.MaxBytesReader exactly once using the
+// resolved per-request limit, so every framework read path (Bind, RawBody,
+// FormValue, File, Files, BindForm) is bounded uniformly — not just JSON. A
+// negative maxBodySize disables the limit (opt-out); zero uses the default.
+//
+// Note: reading Request.Body directly, bypassing these accessors, is not bounded.
+func (c *Ctx) limitBody() {
+	if c.bodyLimited || c.Request == nil || c.Request.Body == nil {
+		return
 	}
+	c.bodyLimited = true
 	limit := c.maxBodySize
 	if limit == 0 {
 		limit = defaultMaxBodySize
 	}
+	if limit < 0 {
+		return // explicitly disabled
+	}
+	if c.writer != nil {
+		c.Request.Body = http.MaxBytesReader(c.writer, c.Request.Body, limit)
+	} else {
+		// No writer (e.g. unit tests): fall back to a hard cap without the
+		// connection-close behaviour MaxBytesReader adds.
+		c.Request.Body = http.MaxBytesReader(nil, c.Request.Body, limit)
+	}
+}
+
+func (c *Ctx) readBody() error {
+	if c.bodyBuf != nil {
+		return nil
+	}
+	c.limitBody()
 	buf := bodyBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	// Pre-size from Content-Length when available so ReadFrom never re-grows.
-	if cl := c.Request.ContentLength; cl > 0 && cl <= limit {
+	// Pre-size from Content-Length only when it fits inside a positive limit, so
+	// an attacker-supplied Content-Length can never drive a large speculative
+	// allocation.
+	if cl := c.Request.ContentLength; cl > 0 && c.maxBodySize > 0 && cl <= c.maxBodySize {
 		buf.Grow(int(cl))
 	}
-	lr := io.LimitReader(c.Request.Body, limit)
-	if _, err := buf.ReadFrom(lr); err != nil {
+	if _, err := buf.ReadFrom(c.Request.Body); err != nil {
 		bodyBufPool.Put(buf)
+		// limitBody wraps the body in http.MaxBytesReader; an overflow surfaces
+		// here as *http.MaxBytesError, which we map to a clean 413 instead of a
+		// confusing 400/500 on a silently truncated body.
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			return ErrPayloadTooLarge("request body exceeds the configured size limit")
+		}
 		return fmt.Errorf("bast: read body: %w", err)
 	}
 	c.bodyOwned = buf
@@ -361,23 +399,124 @@ func (c *Ctx) FormValue(key string) string {
 	if c.Request == nil {
 		return ""
 	}
+	c.limitBody()
 	return c.Request.FormValue(key)
 }
 
-// BindForm binds a multipart or url-encoded form into a struct.
-// Uses reflection — only called by user, never on the hot path.
+// BindForm binds a url-encoded or multipart form into a struct pointer.
+// Fields are matched by their `form:"name"` tag, falling back to the field name.
+// A tag of "-" skips the field. Uses reflection — never on the hot path.
+//
+// Supported field types: string, the signed/unsigned integer kinds, float32/64,
+// bool, time.Duration, and []string (repeated form values). Invalid input yields
+// a 400 BastError so it flows through the error boundary. Values populated by
+// FormValue's r.Form (query + POST body) are used; multipart file parts are read
+// via File/Files, not here.
 func (c *Ctx) BindForm(v any) error {
 	if v == nil {
 		return fmt.Errorf("bast: BindForm: target must not be nil")
 	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return fmt.Errorf("bast: BindForm: target must be a non-nil pointer to a struct")
+	}
+	rv = rv.Elem()
+	if rv.Kind() != reflect.Struct {
+		return fmt.Errorf("bast: BindForm: target must point to a struct")
+	}
+	c.limitBody()
 	if err := c.Request.ParseForm(); err != nil {
-		return fmt.Errorf("bast: parse form: %w", err)
+		return ErrBadRequest(CodeBadRequest, "malformed form body")
+	}
+
+	form := c.Request.Form
+	rt := rv.Type()
+	for i := range rt.NumField() {
+		field := rt.Field(i)
+		fv := rv.Field(i)
+		if !fv.CanSet() {
+			continue
+		}
+		name := field.Tag.Get("form")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		vals, ok := form[name]
+		if !ok || len(vals) == 0 {
+			continue
+		}
+		if err := setFormField(fv, field.Type, vals, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setFormField parses raw form value(s) into the target field. Parse failures
+// return a 400 BastError so callers get a Bad Request, not a 500.
+func setFormField(fv reflect.Value, ft reflect.Type, vals []string, name string) error {
+	// []string captures every repeated value for this key.
+	if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.String {
+		sl := reflect.MakeSlice(ft, len(vals), len(vals))
+		for i, s := range vals {
+			sl.Index(i).SetString(s)
+		}
+		fv.Set(sl)
+		return nil
+	}
+
+	raw := vals[0]
+
+	// time.Duration is an int64 under the hood; handle it before the integer
+	// kinds so "5s" parses as a duration rather than an integer.
+	if ft == reflect.TypeOf(time.Duration(0)) {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: invalid duration", name))
+		}
+		fv.SetInt(int64(d))
+		return nil
+	}
+
+	switch ft.Kind() {
+	case reflect.String:
+		fv.SetString(raw)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: invalid integer", name))
+		}
+		fv.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: invalid unsigned integer", name))
+		}
+		fv.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		f, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: invalid number", name))
+		}
+		fv.SetFloat(f)
+	case reflect.Bool:
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: invalid boolean", name))
+		}
+		fv.SetBool(b)
+	default:
+		return ErrBadRequest(CodeBadRequest, fmt.Sprintf("field %q: unsupported type %s", name, ft))
 	}
 	return nil
 }
 
 // File retrieves a single uploaded file by field name.
 func (c *Ctx) File(field string) (*multipart.FileHeader, error) {
+	c.limitBody()
 	_, fh, err := c.Request.FormFile(field)
 	if err != nil {
 		return nil, fmt.Errorf("bast: file %q: %w", field, err)
@@ -387,7 +526,14 @@ func (c *Ctx) File(field string) (*multipart.FileHeader, error) {
 
 // Files retrieves multiple uploaded files from one field.
 func (c *Ctx) Files(field string) ([]*multipart.FileHeader, error) {
-	if err := c.Request.ParseMultipartForm(c.maxBodySize); err != nil {
+	c.limitBody()
+	// maxMemory bounds how much of the multipart body is buffered in RAM before
+	// spilling to temp files; the total body is already capped by limitBody.
+	mem := c.maxBodySize
+	if mem <= 0 {
+		mem = defaultMaxBodySize
+	}
+	if err := c.Request.ParseMultipartForm(mem); err != nil {
 		return nil, fmt.Errorf("bast: parse multipart: %w", err)
 	}
 	fhs := c.Request.MultipartForm.File[field]
