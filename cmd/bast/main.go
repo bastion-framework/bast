@@ -59,6 +59,52 @@ func main() {
 		}
 		fmt.Printf("✓ Generated %s/%s → %s\n", kind, name, outDir)
 
+	case "run":
+		watch := false
+		for _, a := range os.Args[2:] {
+			switch a {
+			case "--watch", "-w":
+				watch = true
+			default:
+				fatalf("unknown flag %q — usage: bast run [--watch]", a)
+			}
+		}
+		if err := cmdRun(".", watch); err != nil {
+			fatalf("bast run: %v", err)
+		}
+
+	case "build":
+		var opts buildOptions
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			flagValue := func() string {
+				i++
+				if i >= len(args) {
+					fatalf("flag %s needs a value — usage: bast build [-o path] [--os goos] [--arch goarch]", args[i-1])
+				}
+				return args[i]
+			}
+			switch args[i] {
+			case "-o", "--out":
+				opts.out = flagValue()
+			case "--os":
+				opts.goos = flagValue()
+			case "--arch":
+				opts.goarch = flagValue()
+			default:
+				fatalf("unknown flag %q — usage: bast build [-o path] [--os goos] [--arch goarch]", args[i])
+			}
+		}
+		out, err := cmdBuild(".", opts)
+		if err != nil {
+			fatalf("bast build: %v", err)
+		}
+		if info, serr := os.Stat(out); serr == nil {
+			fmt.Printf("✓ Built %s (%.1f MB)\n", out, float64(info.Size())/(1<<20))
+		} else {
+			fmt.Printf("✓ Built %s\n", out)
+		}
+
 	case "version", "--version", "-v":
 		fmt.Println(resolveVersion())
 
@@ -78,8 +124,13 @@ Usage:
   bast generate module <name>         Generate a module (5 files)
   bast generate guard  <name>         Generate a guard
   bast generate service <name>        Generate a shared service
+  bast run [--watch]                  Run the app; --watch restarts on changes
+  bast build [-o path] [--os goos] [--arch goarch]
+                                      Production binary: trimpath, stripped,
+                                      CGO_ENABLED=0 → bin/<app>
+  bast version                        Print the CLI version
 
-Aliases: generate → gen → g
+Aliases: generate → gen → g, --watch → -w
 `)
 }
 

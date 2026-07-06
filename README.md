@@ -85,7 +85,15 @@ bast new <appname>                  # Scaffold a new project
 bast generate module <name>         # Generate a module (5 files)
 bast generate guard  <name>         # Generate a guard
 bast generate service <name>        # Generate a shared service
+bast run                            # Run the app
+bast run --watch                    # Run + rebuild/restart on file changes
+bast build                          # Production binary → bin/<app>
+bast build --os linux --arch arm64  # Cross-compile
 ```
+
+`bast build` produces deployment-ready binaries: reproducible (`-trimpath`),
+stripped (`-s -w`), statically linked (`CGO_ENABLED=0`) — runs in `scratch`
+and distroless containers.
 
 ---
 
