@@ -91,7 +91,9 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 		Docs: &bast.DocsConfig{
-			Enabled:     true,
+			// Set DISABLE_DOCS=1 (or any value) to turn off /docs and
+			// /openapi.json — recommended for production deployments.
+			Enabled:     os.Getenv("DISABLE_DOCS") == "",
 			Path:        "/docs",
 			JSONPath:    "/openapi.json",
 			Title:       "{{.App}} API",

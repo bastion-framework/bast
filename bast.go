@@ -239,6 +239,20 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var mna *router.MethodNotAllowedError
 		if errors.As(err, &mna) {
 			allow := strings.Join(mna.Allow, ", ")
+
+			// Auto-OPTIONS: the path exists but no OPTIONS route is registered.
+			// Run it through the global middleware chain — CORS preflight arrives
+			// as OPTIONS and must reach the CORS middleware, which is global.
+			if r.Method == http.MethodOptions {
+				handler := func(*Ctx) Response {
+					return newRawResponse(http.StatusNoContent, "", nil).WithHeader("Allow", allow)
+				}
+				resp := a.invoke(buildPipeline(handler, a.middleware), ctx)
+				writeResponse(w, resp)
+				a.logger.OnRequest(r.Method, r.URL.Path, resp.Status(), time.Since(start), ctx.IP())
+				return
+			}
+
 			w.Header().Set("Allow", allow)
 			http.Error(w, "405 method not allowed", http.StatusMethodNotAllowed)
 			a.logger.OnRequest(r.Method, r.URL.Path, http.StatusMethodNotAllowed, time.Since(start), "")

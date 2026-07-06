@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// ── MEDIUM-3: X-Forwarded-For must not trust the leftmost (spoofable) entry ──
-
 func ipApp(trusted ...string) *App {
 	return newTestApp(Config{TrustedProxies: trusted},
 		GET("/ip", func(ctx *Ctx) Response {
@@ -72,8 +70,6 @@ func TestIP_UntrustedPeer_IgnoresXFF(t *testing.T) {
 	}
 }
 
-// ── MEDIUM-5: /ready must not leak dependency error detail ────────────────────
-
 func TestReadiness_DoesNotLeakErrorDetail(t *testing.T) {
 	secret := "postgres://user:hunter2@10.1.2.3:5432 connection refused"
 	app := New(Config{
@@ -100,8 +96,6 @@ func TestReadiness_DoesNotLeakErrorDetail(t *testing.T) {
 		}
 	}
 }
-
-// ── LOW: SSE frame injection via Send ─────────────────────────────────────────
 
 func TestStreamCtx_Send_MultilineDataCannotInjectFrames(t *testing.T) {
 	app := newTestApp(Config{},
@@ -138,8 +132,6 @@ func TestStreamCtx_Send_EventNameStripped(t *testing.T) {
 	}
 }
 
-// ── LOW: WithValue must not alias the pooled store/params ─────────────────────
-
 func TestWithValue_DoesNotAliasStore(t *testing.T) {
 	c := newTestCtx()
 	c.Set("shared", "orig")
@@ -173,8 +165,6 @@ func TestWithValue_ParamsPointIntoOwnStorage(t *testing.T) {
 	}
 }
 
-// ── LOW: Swagger UI assets must be self-hostable ──────────────────────────────
-
 func TestDocs_CustomAssetsBaseURL(t *testing.T) {
 	app := New(Config{
 		Logger: &recLogger{},
@@ -194,6 +184,68 @@ func TestDocs_CustomAssetsBaseURL(t *testing.T) {
 	}
 	if strings.Contains(body, "unpkg.com") {
 		t.Errorf("custom AssetsBaseURL still references unpkg:\n%s", body)
+	}
+}
+
+func TestAutoOptions_PathExists_Returns204WithAllow(t *testing.T) {
+	app := newTestApp(Config{},
+		GET("/thing", func(ctx *Ctx) Response { return ctx.OK(nil) }),
+		POST("/thing", func(ctx *Ctx) Response { return ctx.OK(nil) }),
+	)
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("OPTIONS", "/thing", nil))
+	if w.Code != 204 {
+		t.Fatalf("status = %d, want 204 for auto-OPTIONS", w.Code)
+	}
+	allow := w.Header().Get("Allow")
+	if !strings.Contains(allow, "GET") || !strings.Contains(allow, "POST") {
+		t.Errorf("Allow = %q, want GET and POST", allow)
+	}
+}
+
+func TestAutoOptions_RunsGlobalMiddleware(t *testing.T) {
+	// CORS is registered as global middleware; it must see auto-OPTIONS requests
+	// or browser preflight breaks for every route without an explicit OPTIONS handler.
+	mw := func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Ctx) Response {
+			return next(ctx).WithHeader("X-Global-MW", "ran")
+		}
+	}
+	app := New(Config{Logger: &recLogger{}})
+	app.Use(mw)
+	app.Register(Module{Controller: &routesCtrl{[]Route{
+		GET("/thing", func(ctx *Ctx) Response { return ctx.OK(nil) }),
+	}}})
+
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("OPTIONS", "/thing", nil))
+	if w.Header().Get("X-Global-MW") != "ran" {
+		t.Error("global middleware did not run on the auto-OPTIONS path")
+	}
+}
+
+func TestAutoOptions_UnknownPathStays404(t *testing.T) {
+	app := newTestApp(Config{},
+		GET("/thing", func(ctx *Ctx) Response { return ctx.OK(nil) }),
+	)
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("OPTIONS", "/nope", nil))
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404 for OPTIONS on unregistered path", w.Code)
+	}
+}
+
+func TestAutoOptions_ExplicitRouteWins(t *testing.T) {
+	app := newTestApp(Config{},
+		GET("/thing", func(ctx *Ctx) Response { return ctx.OK(nil) }),
+		Route{Method: "OPTIONS", Pattern: "/thing", Handler: func(ctx *Ctx) Response {
+			return ctx.Raw(200, "text/plain", []byte("custom"))
+		}},
+	)
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("OPTIONS", "/thing", nil))
+	if w.Code != 200 || w.Body.String() != "custom" {
+		t.Errorf("explicit OPTIONS route must take precedence, got %d %q", w.Code, w.Body.String())
 	}
 }
 

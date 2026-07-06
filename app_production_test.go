@@ -15,7 +15,6 @@ import (
 type recLogger struct {
 	mu       sync.Mutex
 	statuses []int
-	errs     []error
 }
 
 func (l *recLogger) OnBoot(string)                          {}
@@ -30,11 +29,7 @@ func (l *recLogger) OnRequest(_, _ string, s int, _ time.Duration, _ string) {
 	l.statuses = append(l.statuses, s)
 	l.mu.Unlock()
 }
-func (l *recLogger) OnError(_ *Ctx, err error) {
-	l.mu.Lock()
-	l.errs = append(l.errs, err)
-	l.mu.Unlock()
-}
+func (l *recLogger) OnError(_ *Ctx, _ error) {}
 func (l *recLogger) Info(string, ...any)  {}
 func (l *recLogger) Warn(string, ...any)  {}
 func (l *recLogger) Error(string, ...any) {}
