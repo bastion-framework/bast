@@ -20,7 +20,12 @@ var defaultMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
 var defaultHeaders = []string{"Content-Type", "Authorization"}
 
 // CORS returns a middleware that applies Cross-Origin Resource Sharing headers.
+// Panics on AllowedOrigins ["*"] combined with AllowCredentials: the Fetch spec
+// forbids the pair and every browser rejects it, so it is always a config bug.
 func CORS(cfg CORSConfig) bast.MiddlewareFunc {
+	if cfg.AllowCredentials && isWildcard(cfg.AllowedOrigins) {
+		panic(`middleware: CORS AllowedOrigins ["*"] cannot be combined with AllowCredentials`)
+	}
 	if len(cfg.AllowedMethods) == 0 {
 		cfg.AllowedMethods = defaultMethods
 	}
@@ -39,6 +44,11 @@ func CORS(cfg CORSConfig) bast.MiddlewareFunc {
 
 			allowed := matchOrigin(cfg.AllowedOrigins, origin)
 			if !allowed {
+				// A preflight from a disallowed origin must not reach the handler.
+				// Reply without CORS headers — the browser blocks the real request.
+				if ctx.Method() == "OPTIONS" && ctx.Header("Access-Control-Request-Method") != "" {
+					return ctx.NoContent()
+				}
 				return next(ctx)
 			}
 

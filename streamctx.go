@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/bastion-framework/bast/internal/router"
 )
@@ -65,8 +66,34 @@ func (s *StreamCtx) Status(code int) {
 }
 
 // Send writes a Server-Sent Event to the client.
+//
+// The event name has CR/LF stripped and multi-line data is emitted as one
+// "data:" line per payload line (EventSource rejoins them with \n), so
+// user-supplied text can never forge extra SSE frames.
 func (s *StreamCtx) Send(event, data string) error {
-	if _, err := fmt.Fprintf(s.bw, "event: %s\ndata: %s\n\n", event, data); err != nil {
+	if strings.ContainsAny(event, "\r\n") {
+		event = stripCRLF(event)
+	}
+	if !strings.ContainsAny(data, "\r\n") {
+		if _, err := fmt.Fprintf(s.bw, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return fmt.Errorf("bast: stream send: %w", err)
+		}
+		return nil
+	}
+
+	var b strings.Builder
+	b.Grow(len(event) + len(data) + 16)
+	b.WriteString("event: ")
+	b.WriteString(event)
+	b.WriteByte('\n')
+	data = strings.ReplaceAll(data, "\r", "")
+	for _, line := range strings.Split(data, "\n") {
+		b.WriteString("data: ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	if _, err := s.bw.WriteString(b.String()); err != nil {
 		return fmt.Errorf("bast: stream send: %w", err)
 	}
 	return nil

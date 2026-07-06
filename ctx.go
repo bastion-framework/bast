@@ -180,14 +180,29 @@ func (c *Ctx) Context() context.Context {
 	return c.detachedCtx
 }
 
-// WithValue returns a shallow copy of Ctx with a value injected.
+// WithValue returns a copy of Ctx with a value injected into its context.
+// The copy is strictly request-scoped: it shares the pooled body buffer and
+// Request with the original, so it must never outlive the handler.
 func (c *Ctx) WithValue(key, val any) *Ctx {
-	copy := *c
-	copy.detachedCtx = context.WithValue(c.Context(), key, val)
-	return &copy
+	cp := *c
+	// The struct copy duplicates paramStorage by value, but params still points
+	// into the ORIGINAL's array — re-point it into the copy's own storage.
+	cp.params = cp.paramStorage[:len(c.params)]
+	// The store map is shared by reference; clone it so writes on either side
+	// can't touch the other — the original's map is recycled into the pool.
+	if len(c.store) > 0 {
+		cp.store = make(map[string]any, len(c.store))
+		for k, v := range c.store {
+			cp.store[k] = v
+		}
+	} else {
+		cp.store = nil
+	}
+	cp.detachedCtx = context.WithValue(c.Context(), key, val)
+	return &cp
 }
 
-// --- Request access ---
+
 
 // Param returns a URL path parameter by name.
 func (c *Ctx) Param(key string) string {
@@ -225,22 +240,37 @@ func (c *Ctx) Header(key string) string {
 
 // IP returns the real client IP, respecting X-Forwarded-For and X-Real-IP
 // only when the request comes from a trusted proxy.
+//
+// X-Forwarded-For is walked right to left: each proxy appends the address it
+// saw, so the rightmost entry NOT itself a trusted proxy is the real client.
+// The leftmost entries are attacker-controlled — a client can send a forged
+// XFF header and a trusted proxy will simply append the truth after it.
 func (c *Ctx) IP() string {
 	if c.Request == nil {
 		return ""
 	}
 	remoteIP := stripPort(c.Request.RemoteAddr)
-	if c.isTrustedProxy(remoteIP) {
-		if xff := c.Request.Header.Get("X-Forwarded-For"); xff != "" {
-			// Take the first (leftmost) IP — the original client.
-			if idx := strings.Index(xff, ","); idx != -1 {
-				return strings.TrimSpace(xff[:idx])
+	if !c.isTrustedProxy(remoteIP) {
+		return remoteIP
+	}
+	if xff := c.Request.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := strings.TrimSpace(parts[i])
+			if ip == "" {
+				continue
 			}
-			return strings.TrimSpace(xff)
+			if !c.isTrustedProxy(ip) {
+				return ip
+			}
 		}
-		if xri := c.Request.Header.Get("X-Real-IP"); xri != "" {
-			return strings.TrimSpace(xri)
+		// Every hop is a trusted proxy — the chain's first entry is the origin.
+		if first := strings.TrimSpace(parts[0]); first != "" {
+			return first
 		}
+	}
+	if xri := strings.TrimSpace(c.Request.Header.Get("X-Real-IP")); xri != "" {
+		return xri
 	}
 	return remoteIP
 }

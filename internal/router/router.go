@@ -81,6 +81,11 @@ func methodName(i int) string {
 // Router is a segment-aware radix tree router. Each node is one full URL segment;
 // at boot the mutable tree is BFS-frozen into a flat arena for cache-local lookup.
 // Add during startup only; the first Find freezes all trees permanently.
+//
+// Concurrency contract: all Add calls must happen-before the first Find (the
+// usual case — registration in main, then Listen). Add is not safe to call
+// concurrently with Find; the sealed check panics on late Adds but cannot
+// detect a true race.
 type Router struct {
 	mutable [numMethods]*mutableNode // build phase only; nil after freeze
 	frozen  [numMethods][]flatNode   // immutable after freeze

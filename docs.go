@@ -17,7 +17,15 @@ type DocsConfig struct {
 	Title       string
 	Version     string
 	Description string
+
+	// AssetsBaseURL is where the Swagger UI css/js load from. Defaults to the
+	// unpkg CDN; point it at a self-hosted copy (e.g. "/static/swagger") for
+	// air-gapped or supply-chain-sensitive deployments.
+	AssetsBaseURL string
 }
+
+// defaultSwaggerAssets is the CDN used when DocsConfig.AssetsBaseURL is empty.
+const defaultSwaggerAssets = "https://unpkg.com/swagger-ui-dist@5"
 
 // routeEntry holds a registered route together with its full path and doc for spec building.
 type routeEntry struct {
@@ -351,26 +359,31 @@ func (a *App) registerDocsRoutes() {
 	}
 
 	if d.Path != "" {
+		assets := strings.TrimSuffix(d.AssetsBaseURL, "/")
+		if assets == "" {
+			assets = defaultSwaggerAssets
+		}
 		a.router.Add("GET", d.Path, HandlerFunc(func(ctx *Ctx) Response {
-			html := swaggerUIHTML(d.JSONPath, d.Title)
+			html := swaggerUIHTML(d.JSONPath, d.Title, assets)
 			return newRawResponse(200, "text/html; charset=utf-8", []byte(html))
 		}))
 	}
 }
 
-// swaggerUIHTML returns a minimal Swagger UI page backed by the spec at specURL.
-func swaggerUIHTML(specURL, title string) string {
+// swaggerUIHTML returns a minimal Swagger UI page backed by the spec at specURL,
+// loading its css/js from assetsBase.
+func swaggerUIHTML(specURL, title, assetsBase string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
   <title>%s</title>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="stylesheet" type="text/css" href="%s/swagger-ui.css">
 </head>
 <body>
 <div id="swagger-ui"></div>
-<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script src="%s/swagger-ui-bundle.js"></script>
 <script>
   SwaggerUIBundle({
     url: "%s",
@@ -380,5 +393,5 @@ func swaggerUIHTML(specURL, title string) string {
   })
 </script>
 </body>
-</html>`, title, specURL)
+</html>`, title, assetsBase, assetsBase, specURL)
 }

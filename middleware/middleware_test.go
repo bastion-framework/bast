@@ -178,3 +178,42 @@ func TestCORS_Preflight(t *testing.T) {
 		t.Errorf("ACAM header missing POST: %q", resp.Headers()["Access-Control-Allow-Methods"])
 	}
 }
+
+func TestCORS_WildcardWithCredentials_Panics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("CORS must panic on AllowedOrigins [\"*\"] + AllowCredentials — the Fetch spec forbids the pair and browsers reject it")
+		}
+	}()
+	middleware.CORS(middleware.CORSConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowCredentials: true,
+	})
+}
+
+func TestCORS_DisallowedPreflight_ShortCircuits(t *testing.T) {
+	handlerCalled := false
+	handler := middleware.CORS(middleware.CORSConfig{
+		AllowedOrigins: []string{"https://example.com"},
+	})(func(ctx *bast.Ctx) bast.Response {
+		handlerCalled = true
+		return ctx.OK(nil)
+	})
+
+	ctx := basttest.NewCtx(
+		basttest.WithMethod("OPTIONS"),
+		basttest.WithHeader("Origin", "https://evil.com"),
+		basttest.WithHeader("Access-Control-Request-Method", "POST"),
+	)
+	resp := handler(ctx)
+
+	if handlerCalled {
+		t.Error("a preflight from a disallowed origin must not reach the handler")
+	}
+	if resp.Status() != 204 {
+		t.Errorf("status = %d, want 204 with no CORS headers", resp.Status())
+	}
+	if v := resp.Headers()["Access-Control-Allow-Origin"]; v != "" {
+		t.Errorf("disallowed preflight must carry no ACAO header, got %q", v)
+	}
+}
