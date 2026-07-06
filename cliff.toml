@@ -27,7 +27,7 @@ body = """
 ---
 """
 
-trim = true
+trim = false
 footer = ""
 
 [git]

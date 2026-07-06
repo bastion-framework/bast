@@ -6,95 +6,58 @@ This project follows [Semantic Versioning](https://semver.org) and the format is
 
 ---
 
-## [Unreleased]
+## [v0.4.0] — 2026-07-06
+### Added
 
+- *(cli)* Add run and build commands to bast ([`71beae5`](https://github.com/bastion-framework/bast/commit/71beae53d5dde92088b079f5fcd8e2d55a6cc3a0))
+### Documentation
+
+- Update docs' ([`a3cf6a5`](https://github.com/bastion-framework/bast/commit/a3cf6a55b86ae6477fee112a57cf1a2f5f6d9dc4))
+- Update: ([`0af19c4`](https://github.com/bastion-framework/bast/commit/0af19c49122c50e4dbd56ba6146c7681a428d2ff))
+### Fixed
+
+- Safe server defaults, dead config fields, builtin panic recovery, trustedproxies fails loudly, stream status logging ([`6199894`](https://github.com/bastion-framework/bast/commit/6199894befb6759935d646715c428289ce7d94cd))
+- Relative redirect panic, BindForm no-op ([`5dfff1f`](https://github.com/bastion-framework/bast/commit/5dfff1f72b92de450b965c6dc6daad86efdea4f7))
+- Xff spoofing, readiness leak, sse injection, withValue aliasing, cors ([`5cc57cf`](https://github.com/bastion-framework/bast/commit/5cc57cf37bff5fb744bd6848eaeb9178300d545c))
+- Add auto-OPTIONS, docs disable option ([`71a07e3`](https://github.com/bastion-framework/bast/commit/71a07e3d0ee5fee6dfca79e65b97fb64642e67f8))
+
+---
+## [v0.3.0] — 2026-06-23
+### Added
+
+- Full re-write for the bast router ([`4b7236a`](https://github.com/bastion-framework/bast/commit/4b7236a0e13d7b31baf6aa7b7ce676285af29e03))
+
+---
+## [v0.2.1] — 2026-06-11
 ### Fixed
 
 - *(stream)* Strean route guard + path param gaps ([`686ba5e`](https://github.com/bastion-framework/bast/commit/686ba5ecbf6118148af2a0ecf4712894a14dffc6))
 - Address some risk issues ([`1d6629a`](https://github.com/bastion-framework/bast/commit/1d6629a739526bc48ff9b879a56c10fe006be3a2))
 
 ---
+## [v0.1.1] — 2026-06-08
+### Added
 
-## [0.1.0] — 2026-06-08
+- *(core)* Add core types, Ctx, StreamCtx, and module skeleton ([`ecb5042`](https://github.com/bastion-framework/bast/commit/ecb504231bb3c0b5a3a26cc372bb50f2cdede2b9))
+- *(router)* Add radix tree router ([`868f135`](https://github.com/bastion-framework/bast/commit/868f135748b8c66085725d7439b4baa6d738ce18))
+- *(basttest)* Add bastest, a builtin test package for bast ([`a3cc4e9`](https://github.com/bastion-framework/bast/commit/a3cc4e9facf5743533c9816f7c79196e31fdbc03))
+- *(middleware)* Add functional middlewares ([`c751a5e`](https://github.com/bastion-framework/bast/commit/c751a5e8e4d452c880d0d1deef061acd86aded31))
+- *(health)* Add healthy and ready support functionalities ([`c766b05`](https://github.com/bastion-framework/bast/commit/c766b0524a77560713b303bcd06be7a3aaa8ff04))
+- *(docs)* Add openapi,swagger docs support ([`cab1439`](https://github.com/bastion-framework/bast/commit/cab14395d222f4d93c9348cecff540b3b38d1d0d))
+- *(cli)* Add cli support to bast ([`89c220b`](https://github.com/bastion-framework/bast/commit/89c220be57bffa51d3db34057eab00c1947c3fb6))
+- Add benches ([`47f1885`](https://github.com/bastion-framework/bast/commit/47f1885c91e4a659a1938c49597af5b132998b34))
+- Add benchmarks, fuzz tests, and zero-alloc router ([`a6b374c`](https://github.com/bastion-framework/bast/commit/a6b374cf278d8bad790ab46d3e5fbf0c49d9be75))
+- *(docs)* Add bast documentation ([`5561419`](https://github.com/bastion-framework/bast/commit/556141965c6b5ea37e384dfbf64dac948ed469eb))
+### Documentation
 
-Initial release of the Bast framework.
+- Update docs via ci ([`4816525`](https://github.com/bastion-framework/bast/commit/4816525ad00d7eff780fe44c828ed86f74471cd3))
+- Hope you got to work ([`e196816`](https://github.com/bastion-framework/bast/commit/e196816bbbdc09874cc59700324faa5a56a94d61))
+### Fixed
 
-### Core
-
-- `bast.Ctx` — pooled request context via `sync.Pool`; `*Ctx` deliberately does not implement `context.Context` (structural pool safety)
-- `bast.Response` — immutable value type; all builder methods return a new `Response`
-- `bast.App` — entry point satisfying `http.Handler`; `New`, `Use`, `Guard`, `Register`, `Listen`, `Shutdown`
-- `bast.Module` — portable, self-contained unit with `Prefix`, `Controller`, `Middleware`, `Guards`, nested `Modules`, and `Doc`
-- `bast.HandlerFunc` / `bast.StreamHandlerFunc` — distinct handler signatures for request/response and streaming
-- `bast.Guard` / `bast.GuardFunc` / `bast.SecuredGuard` — pre-handler checks with OpenAPI security scheme support
-- `bast.MiddlewareFunc` — pipeline composition at registration time (not at request time)
-- `bast.StreamCtx` — non-pooled streaming context embedding `context.Context`; `Send`, `Write`, `Flush`, `SetHeader`, `Closed`
-
-### Router
-
-- Radix tree router written from scratch — no third-party router wrapping
-- Static, named param (`:name`), and wildcard (`*name`) segment types
-- Static-wins-over-param priority enforced at insertion time
-- Method-not-allowed returns 405 with `Allow` header, not 404
-- Path params stored in pre-allocated `[8]Param` array inside `Ctx` — zero heap allocations on the hot path
-- `ctx.Param()` is a linear O(N) scan — faster than a hash for N≤8 due to cache locality
-
-### Middleware
-
-- `middleware.RequestID` — crypto-random request ID, stored in Ctx and attached as `X-Request-ID`
-- `middleware.Logger` — structured slog-based request logging
-- `middleware.Recover` — catches user handler panics, returns 500
-- `middleware.CORS` — full CORS with wildcard/specific origins, preflight, credentials, `Vary` header
-
-### Error boundary
-
-- `bast.BastError` — typed error with `Status`, `Code`, `Message`; consistent JSON envelope
-- `bast.ValidationError` — field-level validation errors; auto-detected by the boundary for 422 responses
-- `bast.DefaultErrorHandler` — handles `BastError`, `ValidationError`, unknown errors (500, no internal leak)
-- Error constructors: `ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrBadRequest`, `ErrConflict`, `ErrUnprocessable`, `ErrInternal`
-- Error code constants: `CodeNotFound`, `CodeUnauthorized`, `CodeForbidden`, `CodeValidation`, `CodeConflict`, `CodeInternal`
-
-### Operational
-
-- `bast.HealthConfig` — `/health` (liveness, always 200) and `/ready` (readiness, 200/503) with `CustomCheck`
-- `bast.LoadConfig[T]()` — typed env config with `env`, `default`, `required`, `secret` struct tags; nested structs; all missing required fields reported in one error
-- `bast.Logger` interface — pluggable; default implementation produces colored `[Bast]`-prefixed NestJS-style output
-- `OnBoot`, `OnModuleRegistered`, `OnRouteRegistered`, `OnListening`, `OnShutdown`, `OnRequest`, `OnError`, `Info/Warn/Error/Debug`
-- Lifecycle hooks via `bast.Hooks`: `OnInit` (forward order), `OnReady` (after port bound), `OnShutdown` (reverse order, timeout-isolated)
-
-### OpenAPI / Swagger
-
-- OpenAPI 3.0.3 spec generated from code at startup — no comment annotations, no codegen tools
-- `bast.Doc` on routes — summary, description, tags, params, request body, response shapes, deprecated
-- `bast.Body[T]()` — captures response type via reflection once at startup
-- `bast.SecuredGuard` → auto-populates `securitySchemes`
-- Module `Doc` → OpenAPI `tags` array
-- Swagger UI served at configurable path via CDN
-
-### Testing
-
-- `basttest.NewCtx()` — builds a `*Ctx` outside the pool; `WithParam`, `WithQuery`, `WithHeader`, `WithMethod`, `WithPath`, `WithBody`, `WithRawBody`, `WithStore`, `WithIP`
-- `basttest.NewApp()` — integration test harness via `httptest`; `Do`, `TestResponse`, fluent `Assertions`
-
-### CLI
-
-- `bast new <name>` — scaffolds a working Todo API with full CRUD and in-memory storage
-- `bast generate module <name>` — generates 5 files: module, controller, service, repo, dto
-- `bast generate guard <name>` — generates a guard file
-- `bast generate service <name>` — generates a shared service file
-
-### Benchmarks
-
-| | ns/op | allocs/op |
-|---|---|---|
-| Router — static route | 29 | **0** |
-| Router — param route | 38 | **0** |
-| Ctx acquire + release | 21 | **0** |
-| Ctx param lookup | 3.5 | **0** |
-| App — full static request | 454 | 4 |
-| App — full param request | 473 | 4 |
+- *(ci)* Go.mod was picking up path used in smottest experiment ([`aec31a3`](https://github.com/bastion-framework/bast/commit/aec31a3ada22cadd017075dfdc27d3c195be2b36))
+- *(cli)* Fix issues in project scafould and error reporting binding ([`f42606c`](https://github.com/bastion-framework/bast/commit/f42606c83412f64cd0dad4a2e904ce57d81f9fde))
+- *(docs)* Update docs to use ci docs build ([`bfc4d3e`](https://github.com/bastion-framework/bast/commit/bfc4d3e3b8dcb628c5840043a8e19bc79cec3f3c))
+- Docs ([`a711cae`](https://github.com/bastion-framework/bast/commit/a711cae9a8cdf1409d14fb4927cc360671da2fc6))
 
 ---
 
-[Unreleased]: https://github.com/bastion-framework/bast/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/bastion-framework/bast/releases/tag/v0.1.0
