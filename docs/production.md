@@ -131,4 +131,5 @@ Bast fails fast on configuration bugs rather than degrading silently:
 - [ ] SIGTERM → `app.Shutdown` wired in `main.go`
 - [ ] Liveness/readiness probes pointed at `/health` and `/ready`
 - [ ] Readiness checks registered for critical dependencies
+- [ ] `/docs` and `/openapi.json` disabled or protected (`DocsConfig.Enabled: false`)
 - [ ] A real `Logger` wired (or the default with `NO_COLOR=1` for log collectors)

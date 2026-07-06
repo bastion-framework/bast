@@ -26,10 +26,12 @@ func CustomCheck(name string, fn func(ctx context.Context) error) HealthCheck {
 }
 
 // checkResult holds the outcome of a single health check.
+// Deliberately no error detail: /ready is typically unauthenticated and a
+// failing dependency error can carry DSNs, hostnames, or internal IPs.
+// The detail is logged server-side instead.
 type checkResult struct {
 	Status  string `json:"status"`
 	Latency string `json:"latency,omitempty"`
-	Error   string `json:"error,omitempty"`
 }
 
 // LivenessHandler returns a HandlerFunc for the liveness probe.
@@ -56,10 +58,10 @@ func (a *App) ReadinessHandler() HandlerFunc {
 
 			if err != nil {
 				allHealthy = false
+				a.logger.Error("readiness check %q failed: %v", c.Name, err)
 				results[c.Name] = checkResult{
 					Status:  "degraded",
 					Latency: lat.String(),
-					Error:   err.Error(),
 				}
 			} else {
 				results[c.Name] = checkResult{

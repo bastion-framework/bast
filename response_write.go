@@ -30,8 +30,19 @@ func DefaultErrorHandler(ctx *Ctx, err error) Response {
 
 // writeResponse writes a Response to the wire. Called once per request, after the handler returns.
 func writeResponse(w http.ResponseWriter, resp Response) {
-	if resp.Redirect() != "" {
-		http.Redirect(w, &http.Request{}, resp.Redirect(), resp.Status())
+	if loc := resp.Redirect(); loc != "" {
+		// Emit the redirect directly instead of calling http.Redirect. That helper
+		// dereferences r.URL to resolve a relative Location, and the framework has
+		// no *http.Request to hand it here — a relative target ("/login") would
+		// panic on a nil r.URL. A Location header may be relative per RFC 7231
+		// §7.1.2, so no resolution is needed; we only sanitize CRLF to prevent
+		// response splitting via a user-controlled redirect target.
+		status := resp.Status()
+		if status == 0 {
+			status = http.StatusFound
+		}
+		w.Header().Set("Location", stripCRLF(loc))
+		w.WriteHeader(status)
 		return
 	}
 

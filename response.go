@@ -63,28 +63,29 @@ func (r Response) Err() error { return r.err }
 // Allocates a new backing slice of exactly len+1 — no capacity aliasing possible.
 // Strips \r and \n from both key and value to prevent CRLF injection.
 func (r Response) WithHeader(key, value string) Response {
-	if strings.ContainsAny(key, "\r\n") {
-		key = strings.Map(func(c rune) rune {
-			if c == '\r' || c == '\n' {
-				return -1
-			}
-			return c
-		}, key)
-	}
-	if strings.ContainsAny(value, "\r\n") {
-		value = strings.Map(func(c rune) rune {
-			if c == '\r' || c == '\n' {
-				return -1
-			}
-			return c
-		}, value)
-	}
+	key = stripCRLF(key)
+	value = stripCRLF(value)
 	n := len(r.headers)
 	h := make([]header, n+1)
 	copy(h, r.headers)
 	h[n] = header{key, value}
 	r.headers = h
 	return r
+}
+
+// stripCRLF removes carriage returns and line feeds from a header value to
+// prevent response splitting / CRLF injection. The common (clean) case returns
+// the input unchanged with no allocation.
+func stripCRLF(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.Map(func(c rune) rune {
+		if c == '\r' || c == '\n' {
+			return -1
+		}
+		return c
+	}, s)
 }
 
 // WithStatus returns a new Response with a different status code.

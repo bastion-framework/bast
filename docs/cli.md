@@ -153,6 +153,47 @@ Use shared services for stateless utilities (JWT, hashing, email) that multiple 
 
 ---
 
+## `bast run`
+
+Runs the app in the current project directory.
+
+```bash
+bast run            # equivalent to go run . with graceful Ctrl+C handling
+bast run --watch    # rebuild + restart whenever .go files, go.mod, or go.sum change
+```
+
+Watch mode compiles to a temp binary and restarts the process on every change —
+no third-party watcher needed. `vendor/`, `bin/`, `dist/`, and dot-directories
+are ignored. If a rebuild fails, the previous process keeps running until the
+code compiles again.
+
+---
+
+## `bast build`
+
+Produces a production-ready binary.
+
+```bash
+bast build                          # → bin/<app> (module name)
+bast build -o dist/api              # custom output path
+bast build --os linux --arch arm64  # cross-compile
+```
+
+```bash
+bast build
+# ✓ Built bin/myapp (6.8 MB)
+```
+
+Every build is:
+
+| Flag | Effect |
+|------|--------|
+| `-trimpath` | Reproducible — no local filesystem paths embedded |
+| `-ldflags "-s -w"` | Stripped symbol/debug tables — smaller binaries |
+| `CGO_ENABLED=0` | Statically linked — runs in `scratch` / distroless containers |
+
+---
+
 ## Command aliases
 
 ```bash
